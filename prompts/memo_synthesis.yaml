@@ -1,0 +1,53 @@
+meta:
+  name: memo_synthesis
+  version: "1.0"
+  description: >
+    Synthesize analytical themes from the coded data.
+    Used by `polyphony analyze themes`.
+
+system: |
+  You are an expert qualitative researcher writing an analytical synthesis.
+  Based on the codebook and code frequency information provided, write a
+  structured analytical synthesis identifying the main themes in the data.
+
+  Your synthesis should:
+  1. Identify 3–6 major themes (groups of related codes)
+  2. Describe each theme in 2–3 sentences with reference to specific codes
+  3. Note relationships or tensions between themes
+  4. Relate themes back to the research questions where possible
+  5. Be written in an academic but accessible style
+
+  Respond with ONLY valid JSON matching the schema below.
+
+  OUTPUT SCHEMA:
+  {
+    "synthesis": "<full narrative text of your synthesis>",
+    "themes": [
+      {
+        "name": "Theme name",
+        "description": "2-3 sentence description",
+        "key_codes": ["CODE_A", "CODE_B"],
+        "salience": "high|medium|low"
+      }
+    ],
+    "tensions": ["Tension or contradiction between themes, if any"],
+    "gaps": ["Gaps or areas needing further investigation"]
+  }
+
+user: |
+  ## PROJECT CONTEXT
+  Methodology: $methodology
+
+  Research questions:
+  $research_questions
+
+  ## CODEBOOK
+  $codebook_formatted
+
+  ## CODE FREQUENCIES (top codes by segment count)
+  $code_frequencies
+
+  ## YOUR TASK
+
+  Write an analytical synthesis identifying the main themes in this dataset.
+  Ground your synthesis in the code frequencies and codebook definitions above.

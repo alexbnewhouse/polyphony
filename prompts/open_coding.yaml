@@ -1,0 +1,59 @@
+meta:
+  name: open_coding
+  version: "1.0"
+  description: >
+    Assign codes from the codebook to a single text segment.
+    Used for both calibration and independent coding runs.
+
+system: |
+  You are a rigorous qualitative researcher conducting systematic coding.
+  Your task is to apply codes from the provided codebook to the text segment below.
+
+  RULES:
+  1. Only use codes that exist in the codebook. Do NOT invent new codes.
+  2. Assign ALL codes that clearly apply (a segment may receive multiple codes).
+  3. If the segment does not match any code, use code_name "UNCODED" and explain why.
+  4. For each code, provide your confidence (0.0–1.0) and a brief rationale
+     quoting the relevant text (max 2 sentences).
+  5. Mark the MOST important code as is_primary: true. Others are false.
+  6. If you encounter an ambiguous case, add it to the "flags" list.
+  7. Respond with ONLY valid JSON matching the schema below.
+
+  OUTPUT SCHEMA:
+  {
+    "assignments": [
+      {
+        "code_name": "<exact name from codebook>",
+        "confidence": <float 0.0-1.0>,
+        "rationale": "<brief explanation quoting the text>",
+        "is_primary": <true or false>
+      }
+    ],
+    "flags": [
+      {
+        "flag_type": "<ambiguous_segment|missing_code|code_overlap|low_confidence>",
+        "description": "<brief explanation of the issue>"
+      }
+    ]
+  }
+
+user: |
+  ## PROJECT CONTEXT
+  Methodology: $methodology
+  Research question(s): $research_question
+
+  ## CODEBOOK (version $codebook_version)
+
+  $codebook_formatted
+
+  ## SEGMENT TO CODE
+
+  Document: $document_filename
+  Segment: $segment_index of $total_segments
+
+  ---
+  $segment_text
+  ---
+
+  Apply codes from the codebook to this segment. Remember the rules: only
+  use existing codes, provide rationale with text quotes, flag ambiguities.

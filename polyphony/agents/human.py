@@ -1,0 +1,125 @@
+"""
+polyphony.agents.human
+=================
+Human coder agent. Presents segments and codebook via the terminal (Rich)
+and collects assignments interactively.
+
+Human responses are also logged to llm_call with model_name='human' so the
+audit trail is consistent regardless of who did the coding.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from typing import Any, Dict, List, Optional, Tuple
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt
+from rich.table import Table
+
+from .base import BaseAgent
+
+console = Console()
+
+
+class HumanAgent(BaseAgent):
+    """
+    Interactive terminal-based coding agent for the human supervisor.
+    """
+
+    def __init__(
+        self,
+        agent_id: int,
+        project_id: int,
+        conn: sqlite3.Connection,
+        name: str = "supervisor",
+    ):
+        super().__init__(
+            agent_id=agent_id,
+            project_id=project_id,
+            role="supervisor",
+            model_name="human",
+            model_version="human",
+            temperature=0.0,
+            seed=0,
+            conn=conn,
+        )
+        self.name = name
+
+    def _call_llm(
+        self, system_prompt: str, user_prompt: str
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Display the user_prompt and collect human input.
+        Returns the typed response as both raw text and a minimal parsed dict.
+        """
+        console.print(Panel(user_prompt, title="[bold cyan]Coding Task[/]", expand=False))
+        raw = Prompt.ask("[bold green]Your response[/]")
+        return raw, {"response": raw}
+
+    def code_segment(
+        self,
+        segment_text: str,
+        codes: List[dict],
+        document_name: str,
+        segment_idx: int,
+        total_segments: int,
+    ) -> List[dict]:
+        """
+        Present a segment and collect code assignments interactively.
+        Returns a list of assignment dicts:
+            [{"code_name": str, "confidence": float, "rationale": str, "is_primary": bool}]
+        """
+        console.rule(f"[bold]Segment {segment_idx}/{total_segments} — {document_name}[/]")
+        console.print(Panel(segment_text, title="[cyan]Text[/]", border_style="dim"))
+
+        # Show codebook
+        table = Table(title="Available Codes", show_header=True, header_style="bold magenta")
+        table.add_column("#", width=4)
+        table.add_column("Code", style="bold")
+        table.add_column("Description")
+        for i, code in enumerate(codes, 1):
+            table.add_row(str(i), code["name"], code.get("description", ""))
+        console.print(table)
+
+        console.print(
+            "\nEnter code numbers separated by commas (e.g. 1,3), "
+            "or 'u' for uncoded, or 'f' to flag this segment."
+        )
+
+        assignments = []
+        while True:
+            raw = Prompt.ask("Codes").strip().lower()
+
+            if raw == "u":
+                break
+            elif raw == "f":
+                reason = Prompt.ask("Flag reason")
+                assignments.append({"flag": True, "reason": reason})
+                break
+            else:
+                # Parse comma-separated numbers
+                try:
+                    indices = [int(x.strip()) for x in raw.split(",") if x.strip()]
+                    selected = [codes[i - 1] for i in indices if 1 <= i <= len(codes)]
+                    if not selected:
+                        console.print("[red]No valid codes selected. Try again.[/]")
+                        continue
+                    for j, code in enumerate(selected):
+                        rationale = Prompt.ask(f"  Rationale for '{code['name']}'", default="")
+                        assignments.append(
+                            {
+                                "code_name": code["name"],
+                                "confidence": 1.0,
+                                "rationale": rationale,
+                                "is_primary": j == 0,
+                            }
+                        )
+                    break
+                except (ValueError, IndexError):
+                    console.print("[red]Invalid input. Enter numbers, 'u', or 'f'.[/]")
+                    continue
+
+        return assignments

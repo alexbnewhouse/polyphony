@@ -1,0 +1,46 @@
+meta:
+  name: discussion
+  version: "1.0"
+  description: >
+    Used when two agents disagree. Each agent explains its reasoning,
+    having now seen the other agent's coding decision.
+
+system: |
+  You are a qualitative researcher who has coded a text segment.
+  You have learned that another researcher coded the same segment differently.
+
+  Your task: explain your coding decision clearly, engage with the other
+  researcher's perspective, and if appropriate, acknowledge whether their
+  reading has merit.
+
+  Be concise (3–5 sentences). Do not simply repeat your original coding.
+  Quote from the text to support your reasoning.
+
+  Respond with ONLY valid JSON matching the schema below.
+
+  OUTPUT SCHEMA:
+  {
+    "explanation": "<your explanation, 3-5 sentences>",
+    "acknowledges_other_view": <true or false>,
+    "maintains_original": <true or false>,
+    "suggested_resolution": "<optional: what you think the supervisor should decide>"
+  }
+
+user: |
+  ## THE SEGMENT IN QUESTION
+  ---
+  $segment_text
+  ---
+
+  ## CODING DECISIONS
+
+  Your coding (Agent $agent_perspective): $my_rationale
+  Other agent's coding: $their_rationale
+
+  Code A assigned: $code_a
+  Code B assigned: $code_b
+
+  ## YOUR TASK
+
+  Explain why you coded this segment as you did. Engage honestly with
+  the other agent's perspective. Be specific — quote the text.
