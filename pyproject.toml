@@ -50,7 +50,7 @@ where = ["."]
 include = ["polyphony*"]
 
 [tool.setuptools.package-data]
-polyphony = ["db/migrations/*.sql"]
+polyphony = ["db/migrations/*.sql", "prompt_templates/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -267,10 +267,10 @@ The `polyphony export replication` command packages all of this into a self-cont
 
 ## Customising Prompts
 
-All prompts are in the `prompts/` directory as editable YAML files:
+All prompts are in the `polyphony/prompt_templates/` directory as editable YAML files:
 
 ```
-prompts/
+polyphony/prompt_templates/
 ├── codebook_induction.yaml  # How AIs generate candidate codes
 ├── open_coding.yaml         # How AIs assign codes to segments
 ├── discussion.yaml          # How AIs explain disagreements

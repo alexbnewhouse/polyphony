@@ -348,7 +348,7 @@ def export_replication_package(
     )
 
     # ── 8. prompts/ (snapshot) ───────────────────────────────────────────────
-    prompts_src = Path(__file__).parent.parent.parent / "prompts"
+    prompts_src = Path(__file__).parent.parent / "prompt_templates"
     prompts_dst = output_dir / "prompts"
     if prompts_src.exists():
         shutil.copytree(prompts_src, prompts_dst, dirs_exist_ok=True)

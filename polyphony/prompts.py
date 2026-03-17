@@ -28,8 +28,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
-# Default prompts directory: alongside this file's package root
-_DEFAULT_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+# Default prompts directory: inside this package
+_DEFAULT_PROMPTS_DIR = Path(__file__).parent / "prompt_templates"
 
 
 class PromptTemplate:
