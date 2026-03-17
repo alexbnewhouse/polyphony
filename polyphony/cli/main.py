@@ -69,7 +69,11 @@ def cli(ctx: click.Context, project_slug: str | None) -> None:
       7. polyphony discuss flags                    # Resolve disagreements
       8. polyphony analyze themes                   # Synthesize findings
       9. polyphony export replication               # Archive for publication
-    """
+    
+        NOTE: To choose the LLMs used for the two coders when creating a project,
+        pass the `--model-a` and `--model-b` flags to `polyphony project new`.
+        Example: `polyphony project new --name "My Study" --model-a llama3.1:8b --model-b llama3.2:3b`.
+        """
     ctx.ensure_object(dict)
     ctx.obj["projects_root"] = PROJECTS_ROOT
 

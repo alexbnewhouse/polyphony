@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python3:*)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(.venv/bin/python -c \"import polyphony; print\\('polyphony imported OK, version:', polyphony.__version__\\)\" 2>&1)",
+      "Bash(.venv/bin/pytest tests/ -v 2>&1)",
+      "Bash(.venv/bin/pytest tests/ -v --tb=short 2>&1 | tail -20)",
+      "Bash(.venv/bin/pytest tests/ -q 2>&1 | tail -5)",
+      "Bash(.venv/bin/pytest tests/ -q 2>&1 | tail -10)",
+      "Bash(python:*)"
+    ]
+  }
+}

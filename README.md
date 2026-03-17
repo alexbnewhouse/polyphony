@@ -51,6 +51,15 @@ polyphony project new --name "Housing Precarity Study 2026" --methodology ground
 
 You will be prompted for your research questions. Then configure your two AI coders (default: same model, different random seeds for independent coding).
 
+To choose the LLMs used for the two coders when creating a project, pass the `--model-a` and
+`--model-b` flags to `polyphony project new`. Example:
+
+```bash
+polyphony project new --name "My Study" --model-a llama3.1:8b --model-b llama3.2:3b
+```
+
+The default models are `llama3.1:8b` for both coders unless overridden.
+
 ### 3. Import your data
 
 ```bash
