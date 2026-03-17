@@ -9,12 +9,15 @@ Supported formats:
   - .csv  : CSV with a content column (configurable)
   - .json : JSON array of {content, metadata} objects
   - .docx : Microsoft Word documents (requires python-docx)
+  - .png, .jpg, .jpeg, .gif, .webp, .bmp, .tiff, .tif : images
 
 Segmentation strategies:
   - paragraph : split on blank lines (default, good for interview transcripts)
   - sentence  : split on sentence boundaries (requires simple regex)
   - fixed:<n> : fixed-length windows of n words
   - manual    : no splitting; each document = one segment
+
+Image files are always treated as one segment per image (no text segmentation).
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ import csv
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -33,6 +37,10 @@ from ..db import fetchone, insert, json_col
 
 console = Console()
 
+IMAGE_EXTENSIONS = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif",
+})
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Hashing
@@ -41,6 +49,10 @@ console = Console()
 
 def sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +210,44 @@ def read_json(path: Path) -> List[Tuple[str, dict]]:
     return results
 
 
+def read_image(path: Path, images_dir: Path) -> Tuple[str, str, str, dict]:
+    """
+    Read an image file and copy it into the project's images directory.
+
+    Returns (placeholder_text, content_hash, stored_image_path, metadata).
+    """
+    raw_bytes = path.read_bytes()
+    content_hash = sha256_bytes(raw_bytes)
+
+    # Copy image to project images directory with hash prefix for uniqueness
+    images_dir.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{content_hash[:12]}_{path.name}"
+    stored_path = images_dir / stored_name
+    if not stored_path.exists():
+        shutil.copy2(path, stored_path)
+
+    placeholder = f"[IMAGE: {path.name}]"
+
+    metadata: dict = {
+        "original_filename": path.name,
+        "file_size_bytes": len(raw_bytes),
+        "image_format": path.suffix.lower().lstrip("."),
+    }
+
+    # Try to get image dimensions with Pillow (optional dependency)
+    try:
+        from PIL import Image
+        with Image.open(path) as img:
+            metadata["width"] = img.width
+            metadata["height"] = img.height
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    return placeholder, content_hash, str(stored_path), metadata
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main import function
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,14 +261,19 @@ def import_documents(
     content_col: str = "content",
     min_segment_length: int = 20,
     metadata_override: Optional[dict] = None,
+    project_dir: Optional[Path] = None,
 ) -> dict:
     """
     Import one or more files into the project database.
     Returns a summary dict with counts.
+
+    project_dir is required when importing images — images are copied into
+    <project_dir>/images/ for persistence.
     """
     total_docs = 0
     total_segments = 0
     skipped = []
+    images_dir = Path(project_dir) / "images" if project_dir else None
 
     for path in paths:
         path = Path(path)
@@ -228,11 +283,24 @@ def import_documents(
             continue
 
         suffix = path.suffix.lower()
+        is_image = suffix in IMAGE_EXTENSIONS
 
         # Read file(s)
         entries: List[Tuple[str, dict]] = []
+        image_info: Optional[Tuple[str, str, str, dict]] = None  # for images only
         try:
-            if suffix in (".txt", ".md"):
+            if is_image:
+                if images_dir is None:
+                    console.print(
+                        f"[red]Cannot import image {path.name}: project directory unknown. "
+                        f"Use `polyphony data import` from within a project.[/]"
+                    )
+                    skipped.append(str(path))
+                    continue
+                placeholder, content_hash, stored_path, meta = read_image(path, images_dir)
+                image_info = (placeholder, content_hash, stored_path, meta)
+                entries = [(placeholder, meta)]
+            elif suffix in (".txt", ".md"):
                 text, meta = read_txt(path) if suffix == ".txt" else read_md(path)
                 entries = [(text, meta)]
             elif suffix == ".docx":
@@ -256,7 +324,11 @@ def import_documents(
                 continue
 
             filename = path.name if len(entries) == 1 else f"{path.stem}_row{i + 1}{path.suffix}"
-            content_hash = sha256(text)
+
+            if is_image and image_info:
+                content_hash = image_info[1]
+            else:
+                content_hash = sha256(text)
 
             # Check for duplicates
             existing = fetchone(
@@ -272,7 +344,7 @@ def import_documents(
                 meta.update(metadata_override)
 
             # Insert document
-            doc_id = insert(conn, "document", {
+            doc_data = {
                 "project_id": project_id,
                 "filename": filename,
                 "source_path": str(path),
@@ -281,30 +353,50 @@ def import_documents(
                 "char_count": len(text),
                 "word_count": len(text.split()),
                 "metadata": json_col(meta),
-            })
+                "media_type": "image" if is_image else "text",
+            }
+            if is_image and image_info:
+                doc_data["image_path"] = image_info[2]
+            doc_id = insert(conn, "document", doc_data)
 
-            # Segment
-            segments_data = segment_text(text, segment_strategy, min_segment_length)
-            if not segments_data:
-                console.print(
-                    f"  [yellow]⚠ {filename}: no segments passed the minimum length "
-                    f"({min_segment_length} chars). Try --min-length 10 or --segment-by manual.[/]"
-                )
-                conn.execute("DELETE FROM document WHERE id = ?", (doc_id,))
-                continue
-
-            for seg_idx, (seg_text, char_start, char_end) in enumerate(segments_data):
+            if is_image and image_info:
+                # Image documents: exactly 1 segment per image, no text segmentation
                 insert(conn, "segment", {
                     "document_id": doc_id,
                     "project_id": project_id,
-                    "segment_index": seg_idx,
-                    "text": seg_text,
-                    "char_start": char_start,
-                    "char_end": char_end,
-                    "segment_hash": sha256(seg_text),
+                    "segment_index": 0,
+                    "text": text,
+                    "char_start": 0,
+                    "char_end": len(text),
+                    "segment_hash": content_hash,
                     "is_calibration": 0,
+                    "media_type": "image",
+                    "image_path": image_info[2],
                 })
                 total_segments += 1
+            else:
+                # Text documents: segment as usual
+                segments_data = segment_text(text, segment_strategy, min_segment_length)
+                if not segments_data:
+                    console.print(
+                        f"  [yellow]Warning: {filename}: no segments passed the minimum length "
+                        f"({min_segment_length} chars). Try --min-length 10 or --segment-by manual.[/]"
+                    )
+                    conn.execute("DELETE FROM document WHERE id = ?", (doc_id,))
+                    continue
+
+                for seg_idx, (seg_text, char_start, char_end) in enumerate(segments_data):
+                    insert(conn, "segment", {
+                        "document_id": doc_id,
+                        "project_id": project_id,
+                        "segment_index": seg_idx,
+                        "text": seg_text,
+                        "char_start": char_start,
+                        "char_end": char_end,
+                        "segment_hash": sha256(seg_text),
+                        "is_calibration": 0,
+                    })
+                    total_segments += 1
 
             # Update document status
             conn.execute(

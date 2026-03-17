@@ -123,7 +123,21 @@ def discuss_disagreement(
     project_id = project["id"]
 
     console.rule("[bold yellow]Disagreement Review[/]")
-    console.print(Panel(segment["text"], title=f"[cyan]Segment {segment['id']}[/]"))
+
+    # Handle image vs text segments
+    is_image = segment.get("media_type") == "image"
+    images = [segment["image_path"]] if is_image and segment.get("image_path") else None
+
+    if is_image:
+        console.print(Panel(
+            f"[Image segment: {segment.get('image_path', 'unknown')}]",
+            title=f"[cyan]Segment {segment['id']} (Image)[/]",
+        ))
+        seg_text = f"[IMAGE: {segment.get('image_path', 'unknown')}] (image attached)"
+    else:
+        console.print(Panel(segment["text"], title=f"[cyan]Segment {segment['id']}[/]"))
+        seg_text = segment["text"]
+
     console.print(f"  Agent A coded: [green]{', '.join(codes_a) or '(nothing)'}[/]")
     console.print(f"  Agent B coded: [yellow]{', '.join(codes_b) or '(nothing)'}[/]")
 
@@ -133,14 +147,14 @@ def discuss_disagreement(
 
     if tmpl and hasattr(agent_a, '_call_llm'):
         system, user = tmpl.render(
-            segment_text=segment["text"],
+            segment_text=seg_text,
             code_a=", ".join(codes_a) or "UNCODED",
             code_b=", ".join(codes_b) or "UNCODED",
             my_rationale=f"I assigned: {', '.join(codes_a) or 'nothing'}",
             their_rationale=f"Other agent assigned: {', '.join(codes_b) or 'nothing'}",
             agent_perspective="a",
         )
-        _, parsed_a, call_id_a = agent_a.call("discussion", system, user)
+        _, parsed_a, call_id_a = agent_a.call("discussion", system, user, images=images)
         explanation_a = parsed_a.get("explanation", "")
         if explanation_a:
             console.print(Panel(explanation_a, title="[green]Agent A explains[/]", border_style="green"))
@@ -156,14 +170,14 @@ def discuss_disagreement(
 
     if tmpl and hasattr(agent_b, '_call_llm'):
         system, user = tmpl.render(
-            segment_text=segment["text"],
+            segment_text=seg_text,
             code_a=", ".join(codes_a) or "UNCODED",
             code_b=", ".join(codes_b) or "UNCODED",
             my_rationale=f"I assigned: {', '.join(codes_b) or 'nothing'}",
             their_rationale=explanation_a or f"Other agent assigned: {', '.join(codes_a) or 'nothing'}",
             agent_perspective="b",
         )
-        _, parsed_b, call_id_b = agent_b.call("discussion", system, user)
+        _, parsed_b, call_id_b = agent_b.call("discussion", system, user, images=images)
         explanation_b = parsed_b.get("explanation", "")
         if explanation_b:
             console.print(Panel(explanation_b, title="[yellow]Agent B explains[/]", border_style="yellow"))

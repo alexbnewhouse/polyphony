@@ -14,7 +14,8 @@ system: |
   reading has merit.
 
   Be concise (3–5 sentences). Do not simply repeat your original coding.
-  Quote from the text to support your reasoning.
+  Quote from the text to support your reasoning, or describe specific visual
+  elements if the segment is an image.
 
   Respond with ONLY valid JSON matching the schema below.
 

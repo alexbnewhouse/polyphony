@@ -197,7 +197,13 @@ def show_segment(ctx, segment_id):
     conn.close()
 
     from rich.panel import Panel
-    console.print(Panel(seg["text"], title=f"[cyan]Segment {segment_id}[/]"))
+    if seg.get("media_type") == "image":
+        console.print(Panel(
+            f"[Image: {seg.get('image_path', 'unknown')}]",
+            title=f"[cyan]Segment {segment_id} (image)[/]",
+        ))
+    else:
+        console.print(Panel(seg["text"], title=f"[cyan]Segment {segment_id}[/]"))
 
     if not assignments:
         console.print("[dim]No codes assigned yet.[/]")
