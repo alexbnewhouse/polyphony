@@ -14,6 +14,8 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
+from pathlib import Path
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -49,12 +51,20 @@ class HumanAgent(BaseAgent):
         self.name = name
 
     def _call_llm(
-        self, system_prompt: str, user_prompt: str
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        images: Optional[List[str]] = None,
     ) -> Tuple[str, Dict[str, Any]]:
         """
         Display the user_prompt and collect human input.
         Returns the typed response as both raw text and a minimal parsed dict.
+
+        For image segments, displays the image file path for the human to review.
         """
+        if images:
+            for img_path in images:
+                console.print(f"[bold yellow]Image:[/] {img_path}")
         console.print(Panel(user_prompt, title="[bold cyan]Coding Task[/]", expand=False))
         raw = Prompt.ask("[bold green]Your response[/]")
         return raw, {"response": raw}
@@ -66,6 +76,7 @@ class HumanAgent(BaseAgent):
         document_name: str,
         segment_idx: int,
         total_segments: int,
+        image_path: Optional[str] = None,
     ) -> List[dict]:
         """
         Present a segment and collect code assignments interactively.
@@ -73,7 +84,11 @@ class HumanAgent(BaseAgent):
             [{"code_name": str, "confidence": float, "rationale": str, "is_primary": bool}]
         """
         console.rule(f"[bold]Segment {segment_idx}/{total_segments} — {document_name}[/]")
-        console.print(Panel(segment_text, title="[cyan]Text[/]", border_style="dim"))
+        if image_path:
+            console.print(f"[bold yellow]Image:[/] {image_path}")
+            console.print(Panel(segment_text, title="[cyan]Image Segment[/]", border_style="dim"))
+        else:
+            console.print(Panel(segment_text, title="[cyan]Text[/]", border_style="dim"))
 
         # Show codebook
         table = Table(title="Available Codes", show_header=True, header_style="bold magenta")

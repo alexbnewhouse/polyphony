@@ -16,6 +16,8 @@ class Document(BaseModel):
     status: str = "imported"
     metadata: dict = {}
     imported_at: Optional[datetime] = None
+    media_type: str = "text"  # "text" or "image"
+    image_path: Optional[str] = None
 
 
 class Segment(BaseModel):
@@ -29,3 +31,5 @@ class Segment(BaseModel):
     segment_hash: str
     is_calibration: bool = False
     created_at: Optional[datetime] = None
+    media_type: str = "text"  # "text" or "image"
+    image_path: Optional[str] = None

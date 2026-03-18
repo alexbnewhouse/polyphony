@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import ollama as _ollama
@@ -96,18 +96,28 @@ class OllamaAgent(BaseAgent):
         self._client = _ollama.Client(host=host)
 
     def _call_llm(
-        self, system_prompt: str, user_prompt: str
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        images: Optional[List[str]] = None,
     ) -> Tuple[str, Dict[str, Any]]:
         """
         Send a chat completion request to Ollama. Returns (raw_text, parsed_dict).
         The response must be valid JSON; if parsing fails, returns {} for parsed.
+
+        images: optional list of image file paths for multimodal (vision) models.
+        Ollama natively supports image file paths in the 'images' field.
         """
+        user_message: Dict[str, Any] = {"role": "user", "content": user_prompt}
+        if images:
+            user_message["images"] = images
+
         try:
             response = self._client.chat(
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
+                    user_message,
                 ],
                 options={
                     "temperature": self.temperature,

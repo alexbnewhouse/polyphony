@@ -14,10 +14,14 @@ system: |
   2. Assign ALL codes that clearly apply (a segment may receive multiple codes).
   3. If the segment does not match any code, use code_name "UNCODED" and explain why.
   4. For each code, provide your confidence (0.0–1.0) and a brief rationale
-     quoting the relevant text (max 2 sentences).
+     quoting the relevant text or describing relevant visual content (max 2 sentences).
   5. Mark the MOST important code as is_primary: true. Others are false.
   6. If you encounter an ambiguous case, add it to the "flags" list.
   7. Respond with ONLY valid JSON matching the schema below.
+  8. If the segment is an image (indicated by an [IMAGE:] marker or attached image),
+     analyze the visual content of the provided image. Describe what you observe
+     before coding. Apply codes based on visible elements: subjects, actions,
+     composition, text in image, symbols, setting, and any other relevant features.
 
   OUTPUT SCHEMA:
   {

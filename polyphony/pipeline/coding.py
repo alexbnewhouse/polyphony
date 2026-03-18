@@ -61,6 +61,19 @@ def code_segment(
     if not cb_row:
         raise ValueError(f"Codebook version {run_row['codebook_version_id']} not found.")
 
+    # Handle image vs text segments
+    is_image = segment.get("media_type") == "image"
+    image_path = segment.get("image_path")
+
+    if is_image:
+        segment_content = (
+            f"[This segment is an image. The image is provided as an attachment. "
+            f"Filename: {document_name}]\n"
+            f"Analyze the visual content of the attached image and apply codes."
+        )
+    else:
+        segment_content = segment["text"]
+
     system, user = tmpl.render(
         methodology=project["methodology"],
         research_question=rq_text,
@@ -69,10 +82,11 @@ def code_segment(
         document_filename=document_name,
         segment_index=segment["segment_index"],
         total_segments=total_segments,
-        segment_text=segment["text"],
+        segment_text=segment_content,
     )
 
-    raw, parsed, call_id = agent.call("coding", system, user)
+    images = [image_path] if is_image and image_path else None
+    raw, parsed, call_id = agent.call("coding", system, user, images=images)
 
     # Parse assignments from response
     assignments_raw = parsed.get("assignments", [])

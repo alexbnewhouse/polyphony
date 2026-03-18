@@ -102,10 +102,20 @@ def resolve_flag_interactive(
     console.print(f"Status: {flag['status']}")
     console.print(f"Description: {flag['description']}")
 
+    seg = None
+    images = None
     if flag.get("segment_id"):
         seg = fetchone(conn, "SELECT * FROM segment WHERE id = ?", (flag["segment_id"],))
         if seg:
-            console.print(Panel(seg["text"], title="[cyan]Segment Text[/]"))
+            if seg.get("media_type") == "image":
+                console.print(Panel(
+                    f"[Image segment: {seg.get('image_path', 'unknown')}]",
+                    title="[cyan]Segment (Image)[/]",
+                ))
+                if seg.get("image_path"):
+                    images = [seg["image_path"]]
+            else:
+                console.print(Panel(seg["text"], title="[cyan]Segment Text[/]"))
 
     if mode == "agent_facilitated" and agent_a and agent_b:
         from ..prompts import library as prompt_lib
@@ -133,15 +143,18 @@ def resolve_flag_interactive(
             ]:
                 if not hasattr(agent, '_call_llm'):
                     continue
+                seg_text = seg["text"] if seg else "(no segment)"
+                if seg and seg.get("media_type") == "image":
+                    seg_text = f"[IMAGE: {seg.get('image_path', 'unknown')}] (image attached)"
                 system, user = tmpl.render(
-                    segment_text=seg["text"] if flag.get("segment_id") else "(no segment)",
+                    segment_text=seg_text,
                     code_a=", ".join(codes_a) or "UNCODED",
                     code_b=", ".join(codes_b) or "UNCODED",
                     my_rationale=f"My codes: {', '.join(codes_self) or 'none'}",
                     their_rationale=f"Other agent's codes: {', '.join(codes_other) or 'none'}",
                     agent_perspective=perspective,
                 )
-                _, parsed, call_id = agent.call("discussion", system, user)
+                _, parsed, call_id = agent.call("discussion", system, user, images=images)
                 explanation = parsed.get("explanation", "")
                 if explanation:
                     label = "A" if perspective == "a" else "B"

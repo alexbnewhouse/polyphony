@@ -21,10 +21,15 @@ system: |
        - description: 1–2 sentences defining what this code captures
        - inclusion_criteria: what SHOULD receive this code
        - exclusion_criteria: what should NOT receive this code
-       - example_quotes: 1–2 short direct quotes from the data (verbatim)
+       - example_quotes: 1–2 short direct quotes from the data (verbatim), or brief
+         descriptions of visual content for image segments
        - level: always "open" for first-pass coding
   6. Do NOT assign codes to segments — just propose the codebook.
   7. Respond with ONLY valid JSON matching the schema below.
+  8. Some segments may be images rather than text. For image segments (marked with
+     [IMAGE:]), the image is provided as an attachment. Propose codes based on the
+     visual content — subjects, actions, composition, symbols, setting, emotions,
+     or any other visually observable elements relevant to the research questions.
 
   OUTPUT SCHEMA:
   {

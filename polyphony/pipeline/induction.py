@@ -94,10 +94,21 @@ def run_agent_induction(
     research_questions = json.loads(project.get("research_questions") or "[]")
     rq_text = "\n".join(f"  - {q}" for q in research_questions) or "  (not specified)"
 
-    sample_text = "\n\n---\n\n".join(
-        f"[Segment {s['segment_index']} from document {s['document_id']}]\n{s['text']}"
-        for s in segments
-    )
+    sample_parts = []
+    image_paths = []
+    for s in segments:
+        if s.get("media_type") == "image":
+            sample_parts.append(
+                f"[Segment {s['segment_index']} from document {s['document_id']}]\n"
+                f"[IMAGE: see attached image #{len(image_paths) + 1}]"
+            )
+            if s.get("image_path"):
+                image_paths.append(s["image_path"])
+        else:
+            sample_parts.append(
+                f"[Segment {s['segment_index']} from document {s['document_id']}]\n{s['text']}"
+            )
+    sample_text = "\n\n---\n\n".join(sample_parts)
 
     system, user = tmpl.render(
         methodology=project["methodology"],
@@ -107,7 +118,8 @@ def run_agent_induction(
     )
 
     console.print(f"  [dim]Running induction with {agent.info}...[/]")
-    raw, parsed, call_id = agent.call("induction", system, user)
+    images = image_paths if image_paths else None
+    raw, parsed, call_id = agent.call("induction", system, user, images=images)
 
     # Update coding_run progress
     conn.execute(

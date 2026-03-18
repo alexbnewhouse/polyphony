@@ -15,7 +15,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..db import insert, json_col
 
@@ -58,10 +58,13 @@ class BaseAgent(ABC):
         call_type: str,
         system_prompt: str,
         user_prompt: str,
-    ) -> Tuple[str, Dict[str, Any]]:
+        images: Optional[List[str]] = None,
+    ) -> Tuple[str, Dict[str, Any], int]:
         """
-        Make a call to this agent and return (raw_response, parsed_output).
+        Make a call to this agent and return (raw_response, parsed_output, call_id).
         Logs everything to the llm_call table.
+
+        images: optional list of image file paths for multimodal calls.
         """
         start = time.time()
         error = None
@@ -69,8 +72,13 @@ class BaseAgent(ABC):
         parsed: Dict[str, Any] = {}
         call_id: Optional[int] = None
 
+        # Include image references in the logged prompt for auditability
+        logged_user_prompt = user_prompt
+        if images:
+            logged_user_prompt += "\n\n[Images: " + ", ".join(images) + "]"
+
         try:
-            raw_response, parsed = self._call_llm(system_prompt, user_prompt)
+            raw_response, parsed = self._call_llm(system_prompt, user_prompt, images=images)
         except Exception as exc:
             error = str(exc)
             raise
@@ -79,7 +87,7 @@ class BaseAgent(ABC):
             call_id = self._log_call(
                 call_type=call_type,
                 system_prompt=system_prompt,
-                user_prompt=user_prompt,
+                user_prompt=logged_user_prompt,
                 full_response=raw_response,
                 parsed_output=parsed if not error else None,
                 duration_ms=duration_ms,
@@ -94,12 +102,17 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def _call_llm(
-        self, system_prompt: str, user_prompt: str
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        images: Optional[List[str]] = None,
     ) -> Tuple[str, Dict[str, Any]]:
         """
         Invoke the underlying model. Return (raw_text_response, parsed_dict).
         The parsed_dict should contain whatever structured data was extracted
         from the response (e.g. the JSON assignments block).
+
+        images: optional list of image file paths for multimodal models.
         """
         ...
 

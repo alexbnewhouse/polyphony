@@ -16,6 +16,8 @@ system: |
   3. Note relationships or tensions between themes
   4. Relate themes back to the research questions where possible
   5. Be written in an academic but accessible style
+  6. If the corpus includes image segments alongside text, integrate findings
+     from both modalities in your synthesis where applicable
 
   Respond with ONLY valid JSON matching the schema below.
 
