@@ -1,6 +1,6 @@
 # polyphony — Collaborative Qualitative Data Analysis
 
-**polyphony** is a command-line tool for conducting rigorous qualitative data analysis (QDA) with two local AI language models working alongside you as independent coders. It is designed for solo social scientists who want the analytical benefits of multi-coder studies without a full research team.
+**polyphony** is a command-line tool for conducting rigorous qualitative data analysis (QDA) with two local AI language models working alongside you as independent coders. It supports both text and image data, enabling visual QDA on photographs, diagrams, screenshots, and other visual materials alongside traditional text analysis. It is designed for solo social scientists who want the analytical benefits of multi-coder studies without a full research team.
 
 ---
 
@@ -24,6 +24,7 @@ All model calls are logged with full prompts, responses, model versions, tempera
 - **Inter-rater reliability**: Krippendorff's alpha, Cohen's kappa, percent agreement
 - **Flag & discussion system**: Ambiguous cases surface for structured debate
 - **Analytical memos**: Write theoretical/methodological notes throughout
+- **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
 - **Full replication package**: Every prompt, response, and decision is exportable
 - **Supports multiple methodologies**: Grounded theory, thematic analysis, content analysis
 
@@ -74,6 +75,10 @@ polyphony data import interviews/*.docx
 
 # JSON array
 polyphony data import data.json
+
+# Images (requires a vision-capable model — see Multimodal below)
+polyphony data import photos/*.jpg
+polyphony data import screenshots/*.png diagrams/*.webp
 ```
 
 ### 4. Induce a codebook
@@ -132,13 +137,51 @@ polyphony export assignments   # All coding decisions as CSV
 
 ---
 
+## Multimodal Image Support
+
+polyphony can analyse images alongside text documents. Vision-capable Ollama models (e.g. `llava`, `llama3.2-vision`) code image segments through the standard multimodal message API — the same pipeline stages apply: codebook induction, calibration, independent coding, discussion, and export.
+
+### Setup
+
+```bash
+# Pull a vision-capable model
+ollama pull llava
+
+# Create a project using a vision model for at least one coder
+polyphony project new --name "Visual Study" --model-a llava --model-b llava
+
+# Optional: install Pillow for image dimension metadata
+pip install polyphony[images]
+```
+
+### How it works
+
+- **Supported formats**: PNG, JPEG, GIF, WebP, BMP, TIFF
+- **Import**: Each image becomes a single-segment document with `media_type='image'`. Images are copied to `<project_dir>/images/` with a content-hash prefix for deduplication.
+- **Coding**: When the pipeline encounters an image segment, it sends the image to the vision model alongside the coding prompt. Prompt templates include visual analysis instructions automatically.
+- **Mixed corpora**: You can import text and images into the same project. Text segments are coded by text models; image segments require a vision-capable model.
+- **Replication**: Image file paths are logged in the LLM audit trail. The replication package includes copies of all images and an image count in the manifest.
+
+### Example workflow
+
+```bash
+polyphony data import fieldwork_photos/*.jpg
+polyphony data list                          # media_type column shows 'image' vs 'text'
+polyphony codebook induce --sample-size 10   # vision model describes what it sees
+polyphony code run                           # images coded alongside text
+polyphony code show 42                       # displays image path for image segments
+```
+
+---
+
 ## Project Directory Structure
 
 Each project is stored in `~/.polyphony/projects/<slug>/`:
 
 ```
 ~/.polyphony/projects/housing-precarity-2026/
-└── project.db          # Single SQLite file containing everything
+├── project.db          # Single SQLite file containing everything
+└── images/             # Imported images (created when images are imported)
 ```
 
 A `.polyphony_project` marker file in your working directory points to the active project.
@@ -228,6 +271,12 @@ The `.polyphony_project` file in your working directory remembers which project 
 click, rich, pydantic, ollama, krippendorff, scikit-learn, numpy, pandas, PyYAML, python-docx
 ```
 
+**Optional** (for image metadata extraction):
+
+```bash
+pip install polyphony[images]   # installs Pillow>=10.0
+```
+
 ---
 
 ## Ollama Troubleshooting
@@ -243,6 +292,9 @@ Try a smaller/faster model, e.g. `llama3.2:3b`, or a quantized variant (`llama3.
 
 **Inconsistent outputs despite seed=0**
 Ollama's seed support varies by model. Some models (e.g. Mistral) are more deterministic than others. For maximum reproducibility, set `--temperature 0.0` when creating the project.
+
+**Image coding fails or returns generic descriptions**
+Make sure you are using a vision-capable model (`llava`, `llama3.2-vision`, etc.). Standard text models cannot process images. Check your model with `ollama show <model>` and look for multimodal capabilities.
 
 **Check Ollama logs**
 ```bash
@@ -308,8 +360,8 @@ All interactive steps (codebook review, flag resolution, memo writing) use a fri
 If you use polyphony in published research, please cite it:
 
 ```
-[Your Name] (2026). polyphony: Collaborative qualitative data analysis with
-human and LLM coders. Software. https://github.com/[your-username]/polyphony
+Alex Newhouse (2026). polyphony: Collaborative qualitative data analysis with
+human and LLM coders. Software. https://github.com/alexbnewhouse/polyphony
 ```
 
 ---
