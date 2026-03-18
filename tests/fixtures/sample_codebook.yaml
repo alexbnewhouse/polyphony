@@ -1,0 +1,23 @@
+codebook_version: 1
+stage: inductive
+rationale: "Initial codebook created for housing insecurity analysis."
+created_at: "2026-02-01T10:00:00Z"
+codes:
+  - name: Housing_Insecurity
+    level: 1
+    description: "Experiences and themes related to housing instability, evictions, and affordability."
+    inclusion_criteria: "Mentions of rent, eviction, inability to pay housing costs."
+    exclusion_criteria: "References to general housing policy without personal experience."
+    example_quotes:
+      - "I can't make ends meet anymore. The rent went up again."
+    is_active: true
+    parent_id: null
+  - name: Utilities
+    level: 2
+    description: "Problems with electricity, heating, water, or other utilities."
+    inclusion_criteria: "Reports of broken heating, utility shutoffs, or unpaid bills."
+    exclusion_criteria: "Mentions of utilities in unrelated contexts."
+    example_quotes:
+      - "My landlord hasn't fixed the heating in three months."
+    is_active: true
+    parent_id: null
