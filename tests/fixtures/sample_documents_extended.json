@@ -1,0 +1,50 @@
+[
+  {
+    "content": "I can't make ends meet anymore. The rent went up again and I don't know how I'll pay it next month. Every day I wake up anxious about money.\n\nI try to save where I can but it never seems enough.",
+    "participant_id": "P001",
+    "interview_date": "2026-01-15",
+    "location": "Urban",
+    "age": 34,
+    "gender": "female"
+  },
+  {
+    "content": "My landlord hasn't fixed the heating in three months. We're sleeping in coats. It's not right — we're paying full rent for a place that isn't habitable.",
+    "participant_id": "P002",
+    "interview_date": "2026-01-18",
+    "location": "Urban",
+    "age": 47,
+    "gender": "male"
+  },
+  {
+    "content": "I've been working two jobs but still it's not enough. My kids ask for things and I have to say no. That's the hardest part — looking at their faces.",
+    "participant_id": "P003",
+    "interview_date": "2026-01-20",
+    "location": "Suburban",
+    "age": 29,
+    "gender": "female"
+  },
+  {
+    "content": "The food bank has been a lifeline. Without it I don't know what we'd do. I try to go early so I don't see my neighbours — it's embarrassing.",
+    "participant_id": "P004",
+    "interview_date": "2026-01-22",
+    "location": "Rural",
+    "age": 62,
+    "gender": "female"
+  },
+  {
+    "content": "I feel ashamed going to the food bank but I have no choice. My pride took a hit but you have to put food on the table. My parents never needed charity.",
+    "participant_id": "P005",
+    "interview_date": "2026-01-25",
+    "location": "Urban",
+    "age": 41,
+    "gender": "male"
+  },
+  {
+    "content": "We moved here last year and I still haven't found regular work. Sometimes the language barrier is overwhelming. I study in the evenings, but progress is slow.",
+    "participant_id": "P006",
+    "interview_date": "2026-02-02",
+    "location": "Suburban",
+    "age": 38,
+    "gender": "non-binary"
+  }
+]

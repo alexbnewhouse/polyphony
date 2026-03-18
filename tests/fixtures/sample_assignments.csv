@@ -1,0 +1,4 @@
+assignment_id,segment_id,segment_index,filename,code_name,code_level,agent_role,confidence,rationale,is_primary,run_type,created_at
+1,101,0,interview_P001.txt,Housing_Insecurity,1,coder_a,0.9,"Explicit mention of rent increase",1,initial,2026-02-02T11:00:00Z
+2,102,0,interview_P002.txt,Utilities,2,coder_b,0.8,"Heating not fixed by landlord",1,initial,2026-02-02T11:05:00Z
+3,103,1,interview_P003.txt,Housing_Insecurity,1,coder_a,0.7,"Multiple jobs but still unaffordable",0,initial,2026-02-02T11:10:00Z
