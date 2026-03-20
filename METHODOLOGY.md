@@ -20,7 +20,8 @@ code the same data, then compare their work. This serves three purposes:
    segments where the data is genuinely uncertain or where the codebook is under-specified.
 
 polyphony replaces the second (and optionally third) human coder with two local AI models.
-The human researcher acts as lead coder, supervisor, and final arbiter.
+The human researcher acts as lead coder, supervisor, and final arbiter — and can
+optionally participate as a full third coder for 3-way inter-rater reliability.
 
 ---
 
@@ -41,6 +42,27 @@ as having two human coders:
 You can use the same base model for both coders (different seeds) or two
 different models (e.g. Llama and Mistral) for greater independence.
 
+### Human as Third Coder
+
+Two AI coders may share correlated biases — systematic blind spots that both
+models reproduce due to shared training data. This can inflate IRR by
+producing agreement that reflects model similarity rather than codebook clarity.
+
+polyphony addresses this by allowing the human researcher to code as a full
+third coder (`--agent all`). This:
+
+- **Breaks correlated bias**: Human interpretive judgment is independent of LLM
+  training artifacts.
+- **Captures interpretive sensitivity**: The researcher's domain knowledge and
+  contextual understanding are recorded in coding data, not just supervisory
+  review.
+- **Enables 3-way IRR**: Krippendorff's alpha computed across all three coders
+  is a more robust measure than pairwise agreement between two LLMs.
+
+For large corpora, the human can code a representative sample (`--sample-size N`)
+while LLMs code everything. Krippendorff's alpha natively handles partial data,
+so IRR is computed on the intersection of segments coded by all three.
+
 ---
 
 ## Inductive vs. Deductive Coding
@@ -50,6 +72,11 @@ polyphony prioritises **inductive** (bottom-up) codebook development:
 1. Agents read a sample of the data and propose codes grounded in what they observe.
 2. The human researcher reviews and refines these proposals.
 3. The resulting codebook reflects the data, not a pre-existing theoretical framework.
+
+With **human-led induction** (`--human-leads`), the researcher proposes codes first
+from the sample segments, then sees LLM suggestions merged in. This ensures the
+human's interpretive lens shapes the codebook from the start rather than being
+limited to accepting or rejecting LLM proposals.
 
 This follows the logic of Grounded Theory (Glaser & Strauss 1967; Charmaz 2006)
 and Reflexive Thematic Analysis (Braun & Clarke 2022).
@@ -69,11 +96,15 @@ polyphony reports three reliability metrics:
 - Range: -1 to 1 (1 = perfect, 0 = chance, <0 = systematic disagreement)
 - Threshold for acceptability: **α ≥ 0.80** (Krippendorff 2004); some
   accept **α ≥ 0.67** for exploratory work
+- polyphony reports both **2-way alpha** (A vs B) and **3-way alpha** (A vs B vs
+  supervisor) when the human codes as a third coder
 
 ### Cohen's Kappa (κ)
 - Pairwise reliability accounting for chance agreement
 - Range: -1 to 1
 - Threshold: **κ ≥ 0.80** (strong); **κ ≥ 0.60** (moderate)
+- In 3-way mode, polyphony reports a **pairwise kappa table** for all
+  coder pairs (A–B, A–supervisor, B–supervisor)
 
 ### Percent Agreement
 - Simple baseline: proportion of segments coded identically
@@ -91,14 +122,19 @@ apply consistently. It does not replace human interpretive judgment — it
 supplements it. Disagreements between AI coders should be treated as prompts
 for deeper human analysis, not as errors to be corrected.
 
+When the human codes as a third coder, 3-way alpha provides a stronger validity
+signal: it measures whether the codebook produces consistent results across
+fundamentally different types of coders (human + LLM), not just between two
+instances of the same model family.
+
 ---
 
 ## The Calibration Loop
 
 The calibration loop in polyphony mirrors the "norming" process in human coder studies:
 
-1. Both agents code the same small set of segments.
-2. IRR is computed.
+1. Both agents (or all three, with `--include-supervisor`) code the same small set of segments.
+2. IRR is computed (2-way or 3-way).
 3. If IRR is below the threshold, disagreements are reviewed:
    - Each agent explains its reasoning for disagreements.
    - The human supervisor adjudicates and, if needed, refines code definitions.
@@ -129,6 +165,8 @@ polyphony enforces this at the software level:
 1. **AI coders are not human coders.** Language models do not have lived
    experience, cultural knowledge, or interpretive creativity in the same sense
    as human researchers. High AI-AI IRR does not guarantee valid interpretation.
+   The human-as-lead-coder mode mitigates this by including a human perspective
+   in the reliability measurement, but it does not eliminate the limitation.
 
 2. **Prompt sensitivity.** AI coding decisions depend heavily on prompt wording.
    Prompts should be treated as methodological choices and reported as such.
@@ -155,7 +193,8 @@ When reporting findings from a polyphony-assisted study, we recommend including:
 - Model name and version (digest) for both coders
 - Prompt templates used (include in supplementary materials or replication package)
 - Temperature and seed settings
-- IRR metrics (α, κ, % agreement) at each stage
+- IRR metrics (α, κ, % agreement) at each stage — including 3-way alpha and pairwise kappas if the human coded as a third coder
+- If the human coded a sample rather than the full corpus, the sample size, seed, and the number of segments in the IRR intersection
 - Number of calibration rounds and how disagreements were resolved
 - A statement on the role of AI coders vs. human judgment in the final analysis
 
@@ -165,18 +204,18 @@ When reporting findings from a polyphony-assisted study, we recommend including:
 
 | Term | Definition |
 |------|-----------|
-| **Agent** | An AI model (or human) assigned a coder role in polyphony. Each project has Coder A, Coder B, and a Supervisor (you). |
+| **Agent** | An AI model (or human) assigned a coder role in polyphony. Each project has Coder A, Coder B, and a Supervisor (you). With `--agent all`, the supervisor also acts as a third independent coder. |
 | **Assignment** | The act of applying a code to a segment. One segment can receive multiple assignments. |
 | **Axial coding** | A stage in grounded theory where open codes are grouped into categories with properties and dimensions. |
 | **Calibration** | A structured exercise where both agents code the same sample of segments, then disagreements are reviewed to align their interpretations before full coding. |
 | **Code** | A label applied to a segment that captures a concept, theme, or pattern. Codes have names, descriptions, and optional inclusion/exclusion criteria. |
 | **Codebook** | The complete set of codes with their definitions. polyphony tracks multiple versions as the codebook evolves during analysis. |
-| **Codebook induction** | The process of generating candidate codes from the data rather than specifying them in advance. polyphony supports LLM-assisted induction. |
+| **Codebook induction** | The process of generating candidate codes from the data rather than specifying them in advance. polyphony supports both LLM-assisted induction and human-led induction (`--human-leads`). |
 | **Flag** | A marker on a segment indicating it needs attention — because of ambiguity, a coder disagreement, or a supervisor note. |
 | **Grounded theory** | A methodology in which theory is developed inductively from the data through open, axial, and selective coding. |
-| **Inter-rater reliability (IRR)** | A measure of how consistently two coders have applied the same codes to the same data. polyphony reports Krippendorff's alpha (primary), Cohen's kappa, and percent agreement. |
-| **Krippendorff's alpha (α)** | The primary IRR metric. Ranges from 0 (chance agreement) to 1 (perfect agreement). Values ≥ 0.80 are conventionally acceptable for publication. |
-| **Cohen's kappa (κ)** | An IRR metric that adjusts for chance agreement. Reported per code in polyphony. |
+| **Inter-rater reliability (IRR)** | A measure of how consistently coders have applied the same codes to the same data. polyphony reports Krippendorff's alpha (primary, 2-way and 3-way), pairwise Cohen's kappa, and percent agreement. |
+| **Krippendorff's alpha (α)** | The primary IRR metric. Ranges from 0 (chance agreement) to 1 (perfect agreement). Values ≥ 0.80 are conventionally acceptable for publication. In 3-way mode, alpha is computed across all three coders natively. |
+| **Cohen's kappa (κ)** | An IRR metric that adjusts for chance agreement. Reported per code and, in 3-way mode, for all coder pairs. |
 | **Memo** | A written note capturing theoretical insights, methodological decisions, or analytic observations during the research process. |
 | **Open coding** | The first stage of coding, in which concepts are identified and labelled without predetermined categories. |
 | **Replication package** | A directory generated by `polyphony export replication` containing all materials needed to verify or reproduce the analysis. |

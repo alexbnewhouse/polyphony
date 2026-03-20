@@ -1,6 +1,6 @@
 # polyphony — Collaborative Qualitative Data Analysis
 
-**polyphony** is a command-line tool for conducting rigorous qualitative data analysis (QDA) with two local AI language models working alongside you as independent coders. It supports both text and image data, enabling visual QDA on photographs, diagrams, screenshots, and other visual materials alongside traditional text analysis. It is designed for solo social scientists who want the analytical benefits of multi-coder studies without a full research team.
+**polyphony** is a command-line tool for conducting rigorous qualitative data analysis (QDA) with two local AI language models working alongside you as independent coders. You can also participate as a full third coder for 3-way inter-rater reliability, lead codebook induction yourself, or code a representative sample while the LLMs code the full corpus. It supports both text and image data, enabling visual QDA on photographs, diagrams, screenshots, and other visual materials alongside traditional text analysis. It is designed for solo social scientists who want the analytical benefits of multi-coder studies without a full research team.
 
 ---
 
@@ -18,10 +18,11 @@ All model calls are logged with full prompts, responses, model versions, tempera
 
 ## Key Features
 
-- **Inductive codebook design**: Both AIs suggest codes from a sample; you review and approve
-- **Calibration**: Structured rounds to align coders before full analysis
-- **Independent coding**: Agents code without seeing each other's work
-- **Inter-rater reliability**: Krippendorff's alpha, Cohen's kappa, percent agreement
+- **Inductive codebook design**: Both AIs suggest codes from a sample; you review and approve. With `--human-leads`, you propose codes first.
+- **Human-as-lead-coder**: Optionally code as a full third coder alongside the two LLMs for 3-way IRR, reducing correlated LLM bias
+- **Calibration**: Structured rounds to align coders before full analysis, with optional 3-way calibration (`--include-supervisor`)
+- **Independent coding**: Agents code without seeing each other's work. The supervisor can code all segments or a representative sample (`--sample-size`)
+- **Inter-rater reliability**: Krippendorff's alpha (2-way and 3-way), pairwise Cohen's kappa, percent agreement
 - **Flag & discussion system**: Ambiguous cases surface for structured debate
 - **Analytical memos**: Write theoretical/methodological notes throughout
 - **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
@@ -89,6 +90,12 @@ polyphony codebook induce --sample-size 20
 
 Both AIs read a 20-segment sample and propose codes. You review each candidate: accept, reject, rename, or edit definitions.
 
+To lead codebook development yourself (proposing codes before seeing LLM suggestions):
+
+```bash
+polyphony codebook induce --human-leads
+```
+
 ### 5. Calibrate your coders
 
 ```bash
@@ -96,6 +103,12 @@ polyphony calibrate run
 ```
 
 Both AIs code a small calibration set. Disagreements are reviewed with agent explanations, and you refine code definitions until reliability is acceptable (Krippendorff's α ≥ 0.80 by default).
+
+For 3-way calibration (you code alongside the AIs):
+
+```bash
+polyphony calibrate run --include-supervisor
+```
 
 ### 6. Run independent coding
 
@@ -105,10 +118,18 @@ polyphony code run
 
 Both agents code the full corpus independently. Neither sees the other's work.
 
+To code as a third coder yourself (all three coders):
+
+```bash
+polyphony code run --agent all                   # you code everything alongside the AIs
+polyphony code run --agent all --sample-size 50   # you code 50 segments, AIs code all
+```
+
 ### 7. Compute reliability
 
 ```bash
-polyphony irr compute
+polyphony irr compute                # 2-way (A vs B)
+polyphony irr compute --three-way    # 3-way (A vs B vs supervisor) with pairwise kappa table
 ```
 
 ### 8. Discuss disagreements
@@ -174,6 +195,26 @@ polyphony code show 42                       # displays image path for image seg
 
 ---
 
+## Human-as-Lead-Coder
+
+By default, polyphony runs the two LLM agents as coders while you act as supervisor. The human-as-lead-coder mode makes you a full third coder, directly addressing three methodological concerns:
+
+1. **Correlated LLM bias**: Two LLMs may share systematic blind spots that inflate IRR. Adding a human coder breaks this correlation.
+2. **Interpretive sensitivity**: Your domain expertise and lived understanding of the data are captured directly in coding decisions, not just in supervisory review.
+3. **Rubber-stamping risk**: As a third coder rather than a reviewer, you engage with the data at the same level as the AI agents.
+
+### Three coding modes
+
+| Mode | Command | Human codes | LLMs code | IRR |
+|------|---------|------------|-----------|-----|
+| **Default** (supervisor only) | `polyphony code run` | — | All segments | 2-way (A vs B) |
+| **Full 3-way** | `polyphony code run --agent all` | All segments | All segments | 3-way |
+| **Sample** (practical default) | `polyphony code run --agent all --sample-size 50` | 50 random segments | All segments | 3-way on intersection |
+
+For large corpora, the sample mode is recommended. Krippendorff's alpha natively handles partial data, so IRR is computed on the segments all three coders coded.
+
+---
+
 ## Project Directory Structure
 
 Each project is stored in `~/.polyphony/projects/<slug>/`:
@@ -200,20 +241,20 @@ polyphony data import          Import documents (txt, csv, json, docx)
 polyphony data list            List imported documents
 polyphony data show            Display a document or its segments
 
-polyphony codebook induce      AI-assisted codebook induction
+polyphony codebook induce      AI-assisted codebook induction (--human-leads)
 polyphony codebook show        Display codebook as a tree
 polyphony codebook add         Add a code manually
 polyphony codebook edit        Edit a code in $EDITOR
 polyphony codebook finalize    Mark codebook as final
 polyphony codebook history     Show all codebook versions
 
-polyphony calibrate run        Run calibration round(s)
+polyphony calibrate run        Run calibration round(s) (--include-supervisor)
 
-polyphony code run             Run independent coding
+polyphony code run             Run independent coding (--agent all, --sample-size)
 polyphony code status          Show coding progress
 polyphony code show            Show codes for a specific segment
 
-polyphony irr compute          Calculate inter-rater reliability
+polyphony irr compute          Calculate inter-rater reliability (--three-way)
 polyphony irr show             Display IRR results
 polyphony irr disagreements    List coding disagreements
 
