@@ -33,7 +33,11 @@ from rich.table import Table
 
 from ..db import fetchall, fetchone, insert, json_col
 from ..pipeline.coding import run_coding_session
-from ..pipeline.irr import compute_irr, print_irr_summary, find_disagreements, get_coding_matrix
+from ..pipeline.irr import (
+    compute_irr, compute_irr_multiway, print_irr_summary,
+    find_disagreements, find_disagreements_multiway,
+    get_coding_matrix, get_coding_matrices,
+)
 from ..prompts import library as prompt_lib
 
 console = Console()
@@ -114,10 +118,12 @@ def discuss_disagreement(
     agent_a,
     agent_b,
     flag_id: Optional[int] = None,
+    codes_c: Optional[List[str]] = None,
 ) -> str:
     """
     Facilitate a structured discussion between agents A and B about a
-    disagreement. Returns the supervisor's resolution choice.
+    disagreement. Optionally shows supervisor's codes (codes_c) for 3-way view.
+    Returns the supervisor's resolution choice.
     """
     tmpl = prompt_lib.get("discussion")
     project_id = project["id"]
@@ -140,6 +146,8 @@ def discuss_disagreement(
 
     console.print(f"  Agent A coded: [green]{', '.join(codes_a) or '(nothing)'}[/]")
     console.print(f"  Agent B coded: [yellow]{', '.join(codes_b) or '(nothing)'}[/]")
+    if codes_c is not None:
+        console.print(f"  Supervisor coded: [cyan]{', '.join(codes_c) or '(nothing)'}[/]")
 
     # Ask agents to explain their reasoning (if template available and agents are LLMs)
     explanation_a = ""
@@ -225,12 +233,17 @@ def run_calibration(
     irr_threshold: float = DEFAULT_IRR_THRESHOLD,
     calibration_sample_size: int = 10,
     max_rounds: int = 5,
+    include_supervisor: bool = False,
+    supervisor_agent=None,
 ) -> dict:
     """
     Run calibration round(s) until IRR threshold is met or max_rounds reached.
+    When include_supervisor=True, the supervisor codes as a third coder and
+    3-way IRR is computed.
     Returns the final IRR results dict.
     """
     project_id = project["id"]
+    three_way = include_supervisor and supervisor_agent is not None
 
     # Ensure calibration set is marked
     mark_calibration_set(conn, project_id, n=calibration_sample_size)
@@ -248,22 +261,39 @@ def run_calibration(
             run_type="calibration",
         )
 
+        # Optionally run supervisor as third coder
+        run_id_c = None
+        if three_way:
+            console.print("\n[bold cyan]Supervisor calibration coding:[/]")
+            run_id_c = run_coding_session(
+                conn, project, supervisor_agent, codebook_version_id,
+                run_type="calibration",
+            )
+
         # Compute IRR
-        irr_results = compute_irr(
-            conn, project_id, run_id_a, run_id_b,
-            scope="calibration",
-            notes=f"Calibration round {round_num}",
-        )
+        if three_way and run_id_c:
+            irr_results = compute_irr_multiway(
+                conn, project_id, [run_id_a, run_id_b, run_id_c],
+                scope="calibration",
+                notes=f"Calibration round {round_num} (3-way)",
+            )
+        else:
+            irr_results = compute_irr(
+                conn, project_id, run_id_a, run_id_b,
+                scope="calibration",
+                notes=f"Calibration round {round_num}",
+            )
         print_irr_summary(irr_results)
 
-        alpha = irr_results["krippendorff_alpha"]
+        alpha = irr_results.get("krippendorff_alpha_3way") if three_way else irr_results["krippendorff_alpha"]
+        if alpha is None:
+            alpha = irr_results["krippendorff_alpha"]
 
         if not math.isnan(alpha) and alpha >= irr_threshold:
             console.print(
                 f"\n[green]✓ IRR threshold met (α={alpha:.3f} ≥ {irr_threshold}).[/]\n"
                 "Proceeding to full independent coding."
             )
-            # Update project status
             conn.execute(
                 "UPDATE project SET status='coding', updated_at=datetime('now') WHERE id=?",
                 (project_id,),
@@ -279,8 +309,29 @@ def run_calibration(
             break
 
         # Review disagreements
-        codes_a_map, codes_b_map, _ = get_coding_matrix(conn, run_id_a, run_id_b, "calibration")
-        disagreements = find_disagreements(codes_a_map, codes_b_map)
+        if three_way and run_id_c:
+            codes_maps, _ = get_coding_matrices(
+                conn, [run_id_a, run_id_b, run_id_c], "calibration"
+            )
+            codes_a_map, codes_b_map, codes_c_map = codes_maps
+            disagreements = find_disagreements_multiway([
+                ("coder_a", codes_a_map),
+                ("coder_b", codes_b_map),
+                ("supervisor", codes_c_map),
+            ])
+        else:
+            codes_a_map, codes_b_map, _ = get_coding_matrix(conn, run_id_a, run_id_b, "calibration")
+            disagreements_2way = find_disagreements(codes_a_map, codes_b_map)
+            # Normalize to multiway format for unified review
+            disagreements = [
+                {
+                    "segment_id": d["segment_id"],
+                    "codes_by_role": {"coder_a": d["codes_a"], "coder_b": d["codes_b"]},
+                }
+                for d in disagreements_2way
+            ]
+            codes_c_map = None
+
         console.print(f"\n{len(disagreements)} disagreements to review:\n")
 
         for d in disagreements:
@@ -288,24 +339,30 @@ def run_calibration(
             if not seg:
                 continue
 
-            # Raise a flag for this disagreement
+            codes_by_role = d["codes_by_role"]
+            d_codes_a = codes_by_role.get("coder_a", [])
+            d_codes_b = codes_by_role.get("coder_b", [])
+            d_codes_c = codes_by_role.get("supervisor")
+
+            flag_desc = f"Calibration round {round_num}: A={d_codes_a}, B={d_codes_b}"
+            if d_codes_c is not None:
+                flag_desc += f", Sup={d_codes_c}"
+
             flag_id = insert(conn, "flag", {
                 "project_id": project_id,
                 "raised_by": agent_a.agent_id,
                 "segment_id": d["segment_id"],
                 "flag_type": "irr_disagreement",
-                "description": (
-                    f"Calibration round {round_num}: "
-                    f"A={d['codes_a']}, B={d['codes_b']}"
-                ),
+                "description": flag_desc,
                 "status": "in_discussion",
             })
 
             resolution = discuss_disagreement(
                 conn, project, seg,
-                d["codes_a"], d["codes_b"],
+                d_codes_a, d_codes_b,
                 agent_a, agent_b,
                 flag_id=flag_id,
+                codes_c=d_codes_c,
             )
 
             conn.execute(

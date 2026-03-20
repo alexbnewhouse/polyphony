@@ -74,12 +74,12 @@ def test_cohen_kappa_perfect():
 def test_krippendorff_alpha_perfect():
     codes_a = {i: {"CODE_A"} for i in range(10)}
     codes_b = {i: {"CODE_A"} for i in range(10)}
-    alpha = compute_krippendorff_alpha(codes_a, codes_b, ["CODE_A"])
+    alpha = compute_krippendorff_alpha(codes_a, codes_b, all_codes=["CODE_A"])
     assert abs(alpha - 1.0) < 0.01
 
 
 def test_krippendorff_alpha_empty():
-    alpha = compute_krippendorff_alpha({}, {}, [])
+    alpha = compute_krippendorff_alpha({}, {}, all_codes=[])
     assert math.isnan(alpha)
 
 

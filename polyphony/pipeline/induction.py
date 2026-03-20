@@ -141,16 +141,34 @@ def run_agent_induction(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def merge_candidates(
-    candidates_a: List[dict],
-    candidates_b: List[dict],
+def run_human_induction(
+    conn: sqlite3.Connection,
+    project: dict,
+    supervisor_agent,
+    segments: List[dict],
 ) -> List[dict]:
     """
-    Merge two lists of candidate codes, deduplicating by normalised name.
-    Preserves both agents' descriptions when names differ.
+    Interactive code proposal by the human researcher.
+    Uses the supervisor_agent's propose_codes() method.
+    Returns a list of candidate code dicts.
+    """
+    console.print("\n[bold cyan]Human-Led Codebook Induction[/]")
+    console.print(f"  You will review {len(segments)} sample segments and propose codes.\n")
+    return supervisor_agent.propose_codes(segments)
+
+
+def merge_candidates(
+    *candidate_lists: List[dict],
+) -> List[dict]:
+    """
+    Merge N lists of candidate codes, deduplicating by normalised name.
+    Enriches descriptions when multiple agents proposed similar codes.
     """
     merged: Dict[str, dict] = {}
-    for code in candidates_a + candidates_b:
+    all_candidates = []
+    for cl in candidate_lists:
+        all_candidates.extend(cl)
+    for code in all_candidates:
         name = code.get("name", "").strip()
         if not name:
             continue
@@ -320,17 +338,20 @@ def run_induction(
     sample_size: int = 20,
     sample_seed: int = 42,
     skip_agent_b: bool = False,
+    human_leads: bool = False,
+    supervisor_agent=None,
 ) -> int:
     """
     Full codebook induction pipeline. Returns new codebook_version_id.
 
     Steps:
       1. Sample segments
-      2. Agent A induces candidate codes
-      3. Agent B induces candidate codes (optional)
-      4. Merge candidates
-      5. Human reviews
-      6. Save to DB
+      2. (If human_leads) Human proposes codes first
+      3. Agent A induces candidate codes
+      4. Agent B induces candidate codes (optional)
+      5. Merge candidates
+      6. Human reviews
+      7. Save to DB
     """
     project_id = project["id"]
 
@@ -342,7 +363,13 @@ def run_induction(
     console.print(f"  Sampled {len(segments)} segments from "
                   f"{len(set(s['document_id'] for s in segments))} documents.")
 
-    # Step 2 & 3: Agent inductions (create coding_run records first)
+    # Step 2 (optional): Human-led induction
+    candidates_human = []
+    if human_leads and supervisor_agent is not None:
+        candidates_human = run_human_induction(conn, project, supervisor_agent, segments)
+        console.print(f"  Human proposed {len(candidates_human)} codes.")
+
+    # Step 3 & 4: Agent inductions (create coding_run records first)
     def _make_run(agent, run_type="induction"):
         cb = fetchone(
             conn,
@@ -383,8 +410,14 @@ def run_induction(
     else:
         candidates_b = []
 
-    # Step 4: Merge
-    all_candidates = merge_candidates(candidates_a, candidates_b)
+    # Step 5: Merge all candidate lists
+    all_candidate_lists = []
+    if candidates_human:
+        all_candidate_lists.append(candidates_human)
+    all_candidate_lists.append(candidates_a)
+    if candidates_b:
+        all_candidate_lists.append(candidates_b)
+    all_candidates = merge_candidates(*all_candidate_lists)
     console.print(f"\nMerged to {len(all_candidates)} unique candidate codes.")
 
     # Step 5: Human review

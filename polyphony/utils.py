@@ -52,6 +52,7 @@ def build_agent_objects(conn: sqlite3.Connection, project_id: int, host: str = "
                 agent_id=agent_row["id"],
                 project_id=project_id,
                 conn=conn,
+                role=role,
             )
         else:
             obj = OllamaAgent(

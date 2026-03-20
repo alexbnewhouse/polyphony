@@ -12,6 +12,7 @@ from rich.table import Table
 from ..db import connect, fetchall, fetchone
 from ..utils import build_agent_objects, get_active_codebook
 
+
 console = Console()
 
 
@@ -28,16 +29,20 @@ def code():
 @code.command("run")
 @click.option(
     "--agent",
-    type=click.Choice(["a", "b", "both"]),
+    type=click.Choice(["a", "b", "both", "supervisor", "all"]),
     default="both",
     show_default=True,
-    help="Which agent(s) to run",
+    help="Which agent(s) to run. 'both'=A+B, 'all'=A+B+supervisor",
 )
 @click.option("--resume", is_flag=True, help="Resume an interrupted coding run")
 @click.option("--calibration-only", is_flag=True,
               help="Code only the calibration set (useful for testing)")
+@click.option("--sample-size", default=None, type=int,
+              help="Human codes N randomly sampled segments (LLMs code everything)")
+@click.option("--sample-seed", default=42, show_default=True, type=int,
+              help="Random seed for human sample selection")
 @click.pass_context
-def run(ctx, agent, resume, calibration_only):
+def run(ctx, agent, resume, calibration_only, sample_size, sample_seed):
     """
     Run independent coding: each agent codes every segment using the codebook.
 
@@ -45,9 +50,11 @@ def run(ctx, agent, resume, calibration_only):
     during their coding run.
 
     Examples:
-        polyphony code run              # Both agents code everything
-        polyphony code run --agent a    # Only Coder A
-        polyphony code run --resume     # Continue an interrupted run
+        polyphony code run                        # Both agents code everything
+        polyphony code run --agent a              # Only Coder A
+        polyphony code run --agent all            # A + B + supervisor
+        polyphony code run --agent all --sample-size 50  # Human codes 50, LLMs code all
+        polyphony code run --resume               # Continue an interrupted run
     """
     db_path = ctx.obj.get("db_path")
     if not db_path:
@@ -63,11 +70,11 @@ def run(ctx, agent, resume, calibration_only):
         conn.close()
         sys.exit(1)
 
-    agent_a, agent_b, _ = build_agent_objects(conn, project["id"])
+    agent_a, agent_b, supervisor = build_agent_objects(conn, project["id"])
 
     # Verify Ollama models are available before starting
     for label, ag in [("A", agent_a), ("B", agent_b)]:
-        if agent in ("both",) or (agent == "a" and label == "A") or (agent == "b" and label == "B"):
+        if agent in ("both", "all") or (agent == "a" and label == "A") or (agent == "b" and label == "B"):
             if hasattr(ag, "is_available") and not ag.is_available():
                 console.print(
                     f"[red]Model '{ag.model_name}' (Coder {label}) not found in Ollama.[/]\n"
@@ -77,21 +84,51 @@ def run(ctx, agent, resume, calibration_only):
                 sys.exit(1)
 
     from ..pipeline.coding import run_coding_session
+    import random
 
     run_type = "calibration" if calibration_only else "independent"
 
-    if agent in ("a", "both"):
+    if agent in ("a", "both", "all"):
         run_coding_session(
             conn=conn, project=project, agent=agent_a,
             codebook_version_id=cb["id"],
             run_type=run_type, resume=resume,
         )
 
-    if agent in ("b", "both"):
+    if agent in ("b", "both", "all"):
         run_coding_session(
             conn=conn, project=project, agent=agent_b,
             codebook_version_id=cb["id"],
             run_type=run_type, resume=resume,
+        )
+
+    if agent in ("supervisor", "all"):
+        if not supervisor:
+            console.print("[red]No supervisor agent configured.[/]")
+            conn.close()
+            sys.exit(1)
+
+        # Determine segments for supervisor
+        sup_segments = None
+        if sample_size is not None:
+            # Human codes a random sample
+            all_segs = fetchall(
+                conn,
+                "SELECT * FROM segment WHERE project_id = ? ORDER BY document_id, segment_index",
+                (project["id"],),
+            )
+            if calibration_only:
+                all_segs = [s for s in all_segs if s.get("is_calibration")]
+            rng = random.Random(sample_seed)
+            sup_segments = rng.sample(all_segs, min(sample_size, len(all_segs)))
+            sup_segments.sort(key=lambda s: (s["document_id"], s["segment_index"]))
+            console.print(f"\n[cyan]Supervisor will code {len(sup_segments)} sampled segments.[/]")
+
+        run_coding_session(
+            conn=conn, project=project, agent=supervisor,
+            codebook_version_id=cb["id"],
+            run_type=run_type, resume=resume,
+            segments=sup_segments,
         )
 
     if not calibration_only:

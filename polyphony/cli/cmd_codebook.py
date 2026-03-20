@@ -32,8 +32,10 @@ def codebook():
               help="Number of segments to sample for induction")
 @click.option("--agent", type=click.Choice(["a", "b", "both"]), default="both",
               show_default=True, help="Which agent(s) run induction")
+@click.option("--human-leads", is_flag=True, default=False,
+              help="Human proposes codes first, then sees LLM suggestions")
 @click.pass_context
-def induce(ctx, sample_size, agent):
+def induce(ctx, sample_size, agent, human_leads):
     """
     Generate an initial codebook inductively from your data.
 
@@ -42,13 +44,14 @@ def induce(ctx, sample_size, agent):
     edit, merge, or reject individual codes — building the working codebook
     interactively before full coding begins.
 
-    This supports classic grounded theory induction: codes emerge from the
-    data rather than being specified in advance.
+    With --human-leads, you propose codes first from the sample, then
+    optionally see LLM suggestions merged in.
 
     \b
     Examples:
-        polyphony codebook induce                  # sample 20 segments
-        polyphony codebook induce --sample-size 50 # larger sample for richer induction
+        polyphony codebook induce                    # sample 20 segments
+        polyphony codebook induce --sample-size 50   # larger sample
+        polyphony codebook induce --human-leads      # human proposes codes first
     """
     db_path = ctx.obj.get("db_path")
     if not db_path:
@@ -57,7 +60,7 @@ def induce(ctx, sample_size, agent):
 
     conn = connect(db_path)
     project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
-    agent_a, agent_b, _ = build_agent_objects(conn, project["id"])
+    agent_a, agent_b, supervisor = build_agent_objects(conn, project["id"])
 
     from ..pipeline.induction import run_induction
 
@@ -68,6 +71,8 @@ def induce(ctx, sample_size, agent):
         agent_b=agent_b,
         sample_size=sample_size,
         skip_agent_b=(agent == "a"),
+        human_leads=human_leads,
+        supervisor_agent=supervisor,
     )
     conn.close()
 

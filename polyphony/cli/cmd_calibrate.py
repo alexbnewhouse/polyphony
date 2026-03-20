@@ -37,11 +37,16 @@ def calibrate():
               help="Maximum calibration rounds before proceeding regardless")
 @click.option("--reset", is_flag=True,
               help="Re-select a new calibration set (clears the existing one)")
+@click.option("--include-supervisor", is_flag=True, default=False,
+              help="Include the supervisor as a third coder for 3-way calibration")
 @click.pass_context
-def run(ctx, sample_size, threshold, max_rounds, reset):
+def run(ctx, sample_size, threshold, max_rounds, reset, include_supervisor):
     """
     Run calibration: both agents code the same segment sample, then you
     review disagreements and optionally refine the codebook.
+
+    With --include-supervisor, the human codes the calibration set as a
+    third coder and 3-way Krippendorff's alpha is computed.
 
     Repeats until Krippendorff's alpha meets --threshold or --max-rounds is reached.
 
@@ -49,6 +54,7 @@ def run(ctx, sample_size, threshold, max_rounds, reset):
     Examples:
         polyphony calibrate run
         polyphony calibrate run --sample-size 15 --threshold 0.80
+        polyphony calibrate run --include-supervisor  # 3-way calibration
         polyphony calibrate run --reset   # pick a fresh calibration sample
     """
     db_path = ctx.obj.get("db_path")
@@ -78,7 +84,7 @@ def run(ctx, sample_size, threshold, max_rounds, reset):
             conn.close()
             return
 
-    agent_a, agent_b, _ = build_agent_objects(conn, project["id"])
+    agent_a, agent_b, supervisor = build_agent_objects(conn, project["id"])
 
     from ..pipeline.calibration import run_calibration
 
@@ -91,6 +97,8 @@ def run(ctx, sample_size, threshold, max_rounds, reset):
         irr_threshold=threshold,
         calibration_sample_size=sample_size,
         max_rounds=max_rounds,
+        include_supervisor=include_supervisor,
+        supervisor_agent=supervisor,
     )
     conn.close()
 

@@ -36,12 +36,13 @@ class HumanAgent(BaseAgent):
         agent_id: int,
         project_id: int,
         conn: sqlite3.Connection,
+        role: str = "supervisor",
         name: str = "supervisor",
     ):
         super().__init__(
             agent_id=agent_id,
             project_id=project_id,
-            role="supervisor",
+            role=role,
             model_name="human",
             model_version="human",
             temperature=0.0,
@@ -138,3 +139,64 @@ class HumanAgent(BaseAgent):
                     continue
 
         return assignments
+
+    def propose_codes(
+        self,
+        segments: List[dict],
+    ) -> List[dict]:
+        """
+        Interactive code proposal for human-led induction.
+        Display sample segments and let the human propose codes inductively.
+        Returns a list of candidate code dicts (same format as run_agent_induction).
+        """
+        console.print(
+            Panel(
+                f"[bold]{len(segments)} sample segments[/] are shown below.\n"
+                "Read through them and propose codes that capture meaningful patterns.\n"
+                "Type [green]done[/] when finished proposing codes.",
+                title="[bold cyan]Human-Led Codebook Induction[/]",
+            )
+        )
+
+        # Display segments
+        for i, seg in enumerate(segments, 1):
+            if seg.get("media_type") == "image":
+                console.print(Panel(
+                    f"[bold yellow]Image:[/] {seg.get('image_path', 'unknown')}",
+                    title=f"[dim]Segment {i}/{len(segments)}[/]",
+                    border_style="dim",
+                ))
+            else:
+                console.print(Panel(
+                    seg.get("text", ""),
+                    title=f"[dim]Segment {i}/{len(segments)}[/]",
+                    border_style="dim",
+                ))
+
+        # Interactive code proposal loop
+        candidates: List[dict] = []
+        console.print("\n[bold cyan]Propose codes based on what you observed:[/]")
+        while True:
+            name = Prompt.ask(
+                "\nCode name (or 'done' to finish)",
+                default="done",
+            ).strip()
+            if name.lower() == "done":
+                break
+
+            description = Prompt.ask("  Description")
+            inclusion = Prompt.ask("  Inclusion criteria (optional)", default="")
+            exclusion = Prompt.ask("  Exclusion criteria (optional)", default="")
+
+            candidates.append({
+                "name": name,
+                "description": description,
+                "inclusion_criteria": inclusion or "",
+                "exclusion_criteria": exclusion or "",
+                "example_quotes": [],
+                "level": "open",
+            })
+            console.print(f"  [green]Added: {name}[/]")
+
+        console.print(f"\n[green]{len(candidates)} codes proposed.[/]")
+        return candidates

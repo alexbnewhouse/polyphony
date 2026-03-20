@@ -35,17 +35,24 @@ def irr():
               help="Coding run ID for Agent A (default: latest independent run)")
 @click.option("--run-b", default=None, type=int,
               help="Coding run ID for Agent B (default: latest independent run)")
+@click.option("--run-c", default=None, type=int,
+              help="Coding run ID for supervisor (default: auto-detect latest)")
+@click.option("--three-way", is_flag=True, default=False,
+              help="Compute 3-way IRR including supervisor as third coder")
 @click.option("--notes", default="", help="Notes to attach to this IRR run")
 @click.pass_context
-def compute(ctx, scope, run_a, run_b, notes):
+def compute(ctx, scope, run_a, run_b, run_c, three_way, notes):
     """
-    Compute inter-rater reliability between Coder A and Coder B.
+    Compute inter-rater reliability between coders.
 
     Reports Krippendorff's alpha, Cohen's kappa, and percent agreement.
+    With --three-way, includes the supervisor as a third coder and shows
+    pairwise kappa table.
 
     Example:
         polyphony irr compute
         polyphony irr compute --scope calibration
+        polyphony irr compute --three-way
     """
     db_path = ctx.obj.get("db_path")
     if not db_path:
@@ -78,10 +85,29 @@ def compute(ctx, scope, run_a, run_b, notes):
         conn.close()
         sys.exit(1)
 
-    from ..pipeline.irr import compute_irr, print_irr_summary
+    if three_way:
+        run_id_c = run_c or latest_run("supervisor")
+        if not run_id_c:
+            console.print(
+                "[red]Could not find a completed supervisor coding run.[/]\n"
+                "Run [bold]polyphony code run --agent all[/] first."
+            )
+            conn.close()
+            sys.exit(1)
 
-    results = compute_irr(conn, pid, run_id_a, run_id_b, scope=scope, notes=notes or None)
-    print_irr_summary(results)
+        from ..pipeline.irr import compute_irr_multiway, print_irr_summary
+
+        results = compute_irr_multiway(
+            conn, pid, [run_id_a, run_id_b, run_id_c],
+            scope=scope, notes=notes or None,
+        )
+        print_irr_summary(results)
+    else:
+        from ..pipeline.irr import compute_irr, print_irr_summary
+
+        results = compute_irr(conn, pid, run_id_a, run_id_b, scope=scope, notes=notes or None)
+        print_irr_summary(results)
+
     conn.close()
 
 
@@ -164,11 +190,16 @@ def disagreements(ctx, run_id, limit):
         return
 
     for d in rows:
+        lines = [
+            f"[dim]{(d['segment_text'] or '')[:200]}...[/]\n",
+            f"  Coder A: [green]{d['code_a'] or '(nothing)'}[/]",
+            f"  Coder B: [yellow]{d['code_b'] or '(nothing)'}[/]",
+        ]
+        if d.get("code_c"):
+            lines.append(f"  Supervisor: [cyan]{d['code_c']}[/]")
+        lines.append(f"  Resolution: {d.get('resolution') or '[dim]unresolved[/]'}")
         console.print(Panel(
-            f"[dim]{(d['segment_text'] or '')[:200]}...[/]\n\n"
-            f"  Coder A: [green]{d['code_a'] or '(nothing)'}[/]\n"
-            f"  Coder B: [yellow]{d['code_b'] or '(nothing)'}[/]\n"
-            f"  Resolution: {d.get('resolution') or '[dim]unresolved[/]'}",
+            "\n".join(lines),
             title=f"[cyan]Segment {d['segment_id']}[/]",
             border_style="dim",
         ))
