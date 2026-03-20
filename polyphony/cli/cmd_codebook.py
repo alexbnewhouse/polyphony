@@ -62,6 +62,13 @@ def induce(ctx, sample_size, agent, human_leads):
     project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
     agent_a, agent_b, supervisor = build_agent_objects(conn, project["id"])
 
+    if human_leads and supervisor is None:
+        console.print(
+            "[yellow]Warning: --human-leads requires a supervisor agent. "
+            "Falling back to LLM-only induction.[/]"
+        )
+        human_leads = False
+
     from ..pipeline.induction import run_induction
 
     run_induction(

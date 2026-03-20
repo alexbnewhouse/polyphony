@@ -9,9 +9,13 @@ class IRRRun(BaseModel):
     project_id: int
     coding_run_a_id: int
     coding_run_b_id: int
+    coding_run_c_id: Optional[int] = None
     scope: str = "all"
     krippendorff_alpha: Optional[float] = None
+    krippendorff_alpha_3way: Optional[float] = None
     cohen_kappa: Optional[float] = None
+    cohen_kappa_a_sup: Optional[float] = None
+    cohen_kappa_b_sup: Optional[float] = None
     percent_agreement: Optional[float] = None
     segment_count: Optional[int] = None
     disagreement_count: Optional[int] = None
@@ -25,5 +29,6 @@ class IRRDisagreement(BaseModel):
     segment_id: int
     code_a: Optional[str] = None
     code_b: Optional[str] = None
+    code_c: Optional[str] = None
     resolution: Optional[str] = None
     resolved_at: Optional[datetime] = None

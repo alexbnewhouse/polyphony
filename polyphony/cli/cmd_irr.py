@@ -138,14 +138,32 @@ def show(ctx, run_id):
         return
 
     from ..pipeline.irr import print_irr_summary
-    print_irr_summary({
+
+    results = {
         "krippendorff_alpha": irr_run["krippendorff_alpha"],
         "cohen_kappa": irr_run["cohen_kappa"],
         "percent_agreement": irr_run["percent_agreement"],
         "segment_count": irr_run["segment_count"],
         "disagreement_count": irr_run["disagreement_count"],
         "scope": irr_run["scope"],
-    })
+    }
+    # Include 3-way metrics if present
+    alpha_3way = irr_run.get("krippendorff_alpha_3way")
+    if alpha_3way is not None:
+        results["krippendorff_alpha_3way"] = alpha_3way
+        kappa_a_sup = irr_run.get("cohen_kappa_a_sup")
+        kappa_b_sup = irr_run.get("cohen_kappa_b_sup")
+        if kappa_a_sup is not None or kappa_b_sup is not None:
+            pairwise = {}
+            if irr_run["cohen_kappa"] is not None:
+                pairwise["coder_a_vs_coder_b"] = irr_run["cohen_kappa"]
+            if kappa_a_sup is not None:
+                pairwise["coder_a_vs_supervisor"] = kappa_a_sup
+            if kappa_b_sup is not None:
+                pairwise["coder_b_vs_supervisor"] = kappa_b_sup
+            results["pairwise_kappas"] = pairwise
+
+    print_irr_summary(results)
     conn.close()
 
 

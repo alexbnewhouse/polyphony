@@ -119,7 +119,7 @@ def export_assignments(
     project_id: int,
     output_path: Path,
     format: str = "csv",
-    agent_filter: Optional[str] = None,  # 'a', 'b', or None for all
+    agent_filter: Optional[str] = None,  # 'a', 'b', 'supervisor', or None for all
 ) -> None:
     """Export all coding assignments to CSV or JSON."""
     query = """
@@ -149,6 +149,8 @@ def export_assignments(
         query += " AND ag.role = 'coder_a'"
     elif agent_filter == "b":
         query += " AND ag.role = 'coder_b'"
+    elif agent_filter == "supervisor":
+        query += " AND ag.role = 'supervisor'"
     query += " ORDER BY seg.id, ag.role, c.name"
 
     rows = fetchall(conn, query, tuple(params))
@@ -309,6 +311,15 @@ def export_replication_package(
     coding_dir.mkdir(exist_ok=True)
     export_assignments(conn, project_id, coding_dir / "assignments_agent_a.csv", format="csv", agent_filter="a")
     export_assignments(conn, project_id, coding_dir / "assignments_agent_b.csv", format="csv", agent_filter="b")
+    # Export supervisor assignments if any exist
+    sup_check = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM assignment a JOIN agent ag ON ag.id = a.agent_id "
+        "JOIN coding_run r ON r.id = a.coding_run_id WHERE r.project_id = ? AND ag.role = 'supervisor'",
+        (project_id,),
+    )
+    if sup_check and sup_check["n"] > 0:
+        export_assignments(conn, project_id, coding_dir / "assignments_supervisor.csv", format="csv", agent_filter="supervisor")
     export_assignments(conn, project_id, coding_dir / "assignments_all.csv", format="csv")
 
     # ── 4. irr/ ───────────────────────────────────────────────────────────────
@@ -391,7 +402,10 @@ def export_replication_package(
         },
         "final_irr": {
             "krippendorff_alpha": final_irr.get("krippendorff_alpha"),
+            "krippendorff_alpha_3way": final_irr.get("krippendorff_alpha_3way"),
             "cohen_kappa": final_irr.get("cohen_kappa"),
+            "cohen_kappa_a_sup": final_irr.get("cohen_kappa_a_sup"),
+            "cohen_kappa_b_sup": final_irr.get("cohen_kappa_b_sup"),
             "percent_agreement": final_irr.get("percent_agreement"),
         },
         "codebook_final_version": latest_cb.get("version"),

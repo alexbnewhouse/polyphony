@@ -61,8 +61,8 @@ def export_cb(ctx, fmt, version, output):
 @export.command("assignments")
 @click.option("--format", "fmt", type=click.Choice(["csv", "json"]),
               default="csv", show_default=True)
-@click.option("--agent", type=click.Choice(["a", "b"]), default=None,
-              help="Filter to one agent (default: both)")
+@click.option("--agent", type=click.Choice(["a", "b", "supervisor"]), default=None,
+              help="Filter to one agent (default: all)")
 @click.option("--output", "-o", default=None)
 @click.pass_context
 def export_asgn(ctx, fmt, agent, output):

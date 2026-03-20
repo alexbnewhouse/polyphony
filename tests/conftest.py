@@ -282,3 +282,101 @@ def coding_run_ids(conn, project_id, document_id, codebook_version_id):
 
     conn.commit()
     return run_id_a, run_id_b
+
+
+@pytest.fixture
+def coding_run_ids_3way(conn, project_id, document_id, codebook_version_id):
+    """
+    Create three completed coding runs (A, B, supervisor) with simulated assignments.
+    Returns (run_id_a, run_id_b, run_id_c).
+    """
+    from polyphony.db import fetchall, fetchone
+
+    agents = {
+        row["role"]: row
+        for row in fetchall(conn, "SELECT * FROM agent WHERE project_id = ?", (project_id,))
+    }
+    segments = fetchall(conn, "SELECT * FROM segment WHERE project_id = ?", (project_id,))
+    codes = fetchall(conn, "SELECT * FROM code WHERE codebook_version_id = ?", (codebook_version_id,))
+    code_by_name = {c["name"]: c["id"] for c in codes}
+
+    def make_run(agent_role: str) -> int:
+        run_id = insert(conn, "coding_run", {
+            "project_id": project_id,
+            "codebook_version_id": codebook_version_id,
+            "agent_id": agents[agent_role]["id"],
+            "run_type": "independent",
+            "status": "complete",
+            "segment_count": len(segments),
+        })
+        return run_id
+
+    # A and B mostly agree, supervisor has a few differences
+    assignments_a = {
+        0: ["FINANCIAL_STRESS"],
+        1: ["HOUSING_PRECARITY"],
+        2: ["FINANCIAL_STRESS"],
+        3: ["COPING_STRATEGY"],
+        4: ["SHAME_STIGMA", "COPING_STRATEGY"],
+        5: ["SOCIAL_ISOLATION"],
+        6: ["SOCIAL_ISOLATION"],
+        7: ["FINANCIAL_STRESS"],
+        8: ["FINANCIAL_STRESS"],
+        9: ["FINANCIAL_STRESS", "COPING_STRATEGY"],
+    }
+    assignments_b = {
+        0: ["FINANCIAL_STRESS"],
+        1: ["HOUSING_PRECARITY"],
+        2: ["FINANCIAL_STRESS", "COPING_STRATEGY"],
+        3: ["COPING_STRATEGY"],
+        4: ["SHAME_STIGMA"],
+        5: ["SOCIAL_ISOLATION"],
+        6: ["SOCIAL_ISOLATION"],
+        7: ["FINANCIAL_STRESS"],
+        8: ["FINANCIAL_STRESS"],
+        9: ["FINANCIAL_STRESS", "COPING_STRATEGY"],
+    }
+    assignments_c = {
+        0: ["FINANCIAL_STRESS"],
+        1: ["HOUSING_PRECARITY"],
+        2: ["FINANCIAL_STRESS"],
+        3: ["COPING_STRATEGY"],
+        4: ["SHAME_STIGMA"],
+        5: ["SOCIAL_ISOLATION"],
+        6: ["SOCIAL_ISOLATION"],
+        7: ["FINANCIAL_STRESS"],
+        8: ["FINANCIAL_STRESS"],
+        9: ["FINANCIAL_STRESS"],  # supervisor doesn't add COPING_STRATEGY
+    }
+
+    run_id_a = make_run("coder_a")
+    run_id_b = make_run("coder_b")
+    run_id_c = make_run("supervisor")
+
+    seg_by_index = {s["segment_index"]: s for s in segments}
+
+    for assignments, run_id, role in [
+        (assignments_a, run_id_a, "coder_a"),
+        (assignments_b, run_id_b, "coder_b"),
+        (assignments_c, run_id_c, "supervisor"),
+    ]:
+        agent_id = agents[role]["id"]
+        for seg_idx, code_names in assignments.items():
+            seg = seg_by_index.get(seg_idx)
+            if not seg:
+                continue
+            for j, code_name in enumerate(code_names):
+                code_id = code_by_name.get(code_name)
+                if code_id:
+                    insert(conn, "assignment", {
+                        "coding_run_id": run_id,
+                        "segment_id": seg["id"],
+                        "code_id": code_id,
+                        "agent_id": agent_id,
+                        "confidence": 0.85,
+                        "rationale": f"Test rationale for {code_name}",
+                        "is_primary": 1 if j == 0 else 0,
+                    })
+
+    conn.commit()
+    return run_id_a, run_id_b, run_id_c

@@ -245,6 +245,14 @@ def run_calibration(
     project_id = project["id"]
     three_way = include_supervisor and supervisor_agent is not None
 
+    if include_supervisor and supervisor_agent is not None:
+        if supervisor_agent.model_name != "human":
+            console.print(
+                "[yellow]Warning: --include-supervisor is intended for a human agent, "
+                f"but supervisor is '{supervisor_agent.model_name}'. "
+                "Proceeding, but 3-way IRR may not break correlated LLM bias.[/]"
+            )
+
     # Ensure calibration set is marked
     mark_calibration_set(conn, project_id, n=calibration_sample_size)
 

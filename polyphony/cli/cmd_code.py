@@ -120,7 +120,13 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed):
             if calibration_only:
                 all_segs = [s for s in all_segs if s.get("is_calibration")]
             rng = random.Random(sample_seed)
-            sup_segments = rng.sample(all_segs, min(sample_size, len(all_segs)))
+            actual_size = min(sample_size, len(all_segs))
+            if actual_size < sample_size:
+                console.print(
+                    f"\n[yellow]Sample size {sample_size} exceeds available segments "
+                    f"({len(all_segs)}), using all {len(all_segs)}.[/]"
+                )
+            sup_segments = rng.sample(all_segs, actual_size)
             sup_segments.sort(key=lambda s: (s["document_id"], s["segment_index"]))
             console.print(f"\n[cyan]Supervisor will code {len(sup_segments)} sampled segments.[/]")
 

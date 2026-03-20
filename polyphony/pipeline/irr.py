@@ -43,51 +43,10 @@ def get_coding_matrix(
     """
     Build coding matrices for two runs.
     Returns (codes_by_seg_a, codes_by_seg_b, all_code_names).
-    Each dict maps segment_id → set of code names.
+    Thin wrapper around get_coding_matrices() for backward compatibility.
     """
-    def load_run(run_id: int) -> Dict[int, Set[str]]:
-        rows = fetchall(
-            conn,
-            """
-            SELECT a.segment_id, c.name AS code_name
-            FROM assignment a
-            JOIN code c ON c.id = a.code_id
-            WHERE a.coding_run_id = ?
-            """,
-            (run_id,),
-        )
-        result: Dict[int, Set[str]] = {}
-        for row in rows:
-            result.setdefault(row["segment_id"], set()).add(row["code_name"])
-        return result
-
-    codes_a = load_run(run_id_a)
-    codes_b = load_run(run_id_b)
-
-    # Apply scope filter
-    if scope == "calibration":
-        cal_segs = {
-            row["id"]
-            for row in fetchall(
-                conn,
-                "SELECT id FROM segment WHERE is_calibration = 1",
-            )
-        }
-        codes_a = {k: v for k, v in codes_a.items() if k in cal_segs}
-        codes_b = {k: v for k, v in codes_b.items() if k in cal_segs}
-    elif scope.startswith("code:"):
-        target_code = scope[5:]
-        codes_a = {k: v for k, v in codes_a.items() if target_code in v}
-        codes_b = {k: v for k, v in codes_b.items() if target_code in v}
-
-    # All codes seen in either run
-    all_codes: Set[str] = set()
-    for s in codes_a.values():
-        all_codes.update(s)
-    for s in codes_b.values():
-        all_codes.update(s)
-
-    return codes_a, codes_b, sorted(all_codes)
+    codes_maps, all_codes = get_coding_matrices(conn, [run_id_a, run_id_b], scope)
+    return codes_maps[0], codes_maps[1], all_codes
 
 
 def get_coding_matrices(
@@ -149,16 +108,9 @@ def compute_percent_agreement(
     """
     Percent agreement: proportion of segments where both coders agree exactly.
     Returns (percent_agreement, n_agree, n_total).
+    Thin wrapper around compute_percent_agreement_multiway().
     """
-    all_segs = set(codes_a.keys()) | set(codes_b.keys())
-    if not all_segs:
-        return 0.0, 0, 0
-    agree = sum(
-        1
-        for seg_id in all_segs
-        if codes_a.get(seg_id, set()) == codes_b.get(seg_id, set())
-    )
-    return agree / len(all_segs), agree, len(all_segs)
+    return compute_percent_agreement_multiway(codes_a, codes_b)
 
 
 def compute_percent_agreement_multiway(
