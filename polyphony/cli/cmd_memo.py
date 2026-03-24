@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -64,7 +65,7 @@ def new_memo(ctx, memo_type, title, link_codes, link_segments, tags):
         tmp_path = f.name
 
     editor = os.environ.get("EDITOR", "nano")
-    subprocess.run([editor, tmp_path], check=True)
+    subprocess.run(shlex.split(editor) + [tmp_path], check=True)
     content = Path(tmp_path).read_text().strip()
     Path(tmp_path).unlink()
 

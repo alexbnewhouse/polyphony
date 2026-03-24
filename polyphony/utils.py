@@ -40,21 +40,50 @@ def build_agent_objects(conn: sqlite3.Connection, project_id: int, host: str = "
     """
     Instantiate agent objects from DB records.
     Returns (agent_a, agent_b, supervisor_agent).
+
+    Supported ``agent_type`` values in the database:
+    - ``"human"`` — interactive terminal coder (HumanAgent)
+    - ``"llm"`` — local Ollama model (OllamaAgent)
+    - ``"openai"`` — OpenAI-compatible API (OpenAIAgent)
+    - ``"anthropic"`` — Anthropic Messages API (AnthropicAgent)
     """
-    from .agents import OllamaAgent, HumanAgent
+    from .agents import OllamaAgent, HumanAgent, OpenAIAgent, AnthropicAgent
 
     agents_db = get_agents(conn, project_id)
     agent_a = agent_b = supervisor = None
 
     for role, agent_row in agents_db.items():
-        if agent_row["agent_type"] == "human":
+        agent_type = agent_row["agent_type"]
+
+        if agent_type == "human":
             obj = HumanAgent(
                 agent_id=agent_row["id"],
                 project_id=project_id,
                 conn=conn,
                 role=role,
             )
+        elif agent_type == "openai":
+            obj = OpenAIAgent(
+                agent_id=agent_row["id"],
+                project_id=project_id,
+                role=role,
+                model_name=agent_row["model_name"],
+                temperature=agent_row["temperature"] or 0.1,
+                seed=agent_row["seed"] or 42,
+                conn=conn,
+            )
+        elif agent_type == "anthropic":
+            obj = AnthropicAgent(
+                agent_id=agent_row["id"],
+                project_id=project_id,
+                role=role,
+                model_name=agent_row["model_name"],
+                temperature=agent_row["temperature"] or 0.1,
+                seed=agent_row["seed"] or 42,
+                conn=conn,
+            )
         else:
+            # Default: "llm" → Ollama
             obj = OllamaAgent(
                 agent_id=agent_row["id"],
                 project_id=project_id,
@@ -65,6 +94,7 @@ def build_agent_objects(conn: sqlite3.Connection, project_id: int, host: str = "
                 conn=conn,
                 host=host,
             )
+
         if role == "coder_a":
             agent_a = obj
         elif role == "coder_b":

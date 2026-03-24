@@ -1,6 +1,6 @@
 # polyphony — Collaborative Qualitative Data Analysis
 
-**polyphony** is a command-line tool for conducting rigorous qualitative data analysis (QDA) with two local AI language models working alongside you as independent coders. You can also participate as a full third coder for 3-way inter-rater reliability, lead codebook induction yourself, or code a representative sample while the LLMs code the full corpus. It supports both text and image data, enabling visual QDA on photographs, diagrams, screenshots, and other visual materials alongside traditional text analysis. It is designed for solo social scientists who want the analytical benefits of multi-coder studies without a full research team.
+**polyphony** is a command-line tool for conducting rigorous qualitative data analysis (QDA) with two AI language models working alongside you as independent coders. You can also participate as a full third coder for 3-way inter-rater reliability, lead codebook induction yourself, or code a representative sample while the LLMs code the full corpus. It supports both inductive and deductive coding, text and image data, and multiple model providers (Ollama, OpenAI, Anthropic). It is designed for solo social scientists who want the analytical benefits of multi-coder studies without a full research team.
 
 ---
 
@@ -9,7 +9,7 @@
 In a traditional multi-coder QDA study, two or more researchers independently code the same data, then discuss disagreements until they reach agreement. polyphony replicates this workflow:
 
 - **You** act as lead researcher and supervisor
-- **Coder A** and **Coder B** are two local AI models (via [Ollama](https://ollama.ai))
+- **Coder A** and **Coder B** are two AI models (local via [Ollama](https://ollama.ai), or cloud via OpenAI/Anthropic)
 - The system guides you through every stage: codebook design → calibration → coding → reliability → discussion → analysis → export
 
 All model calls are logged with full prompts, responses, model versions, temperature, and seed — so every analytical decision is fully reproducible.
@@ -19,14 +19,17 @@ All model calls are logged with full prompts, responses, model versions, tempera
 ## Key Features
 
 - **Inductive codebook design**: Both AIs suggest codes from a sample; you review and approve. With `--human-leads`, you propose codes first.
+- **Deductive codebook import**: Import a pre-existing codebook from YAML, JSON, or CSV for theory-driven coding (`codebook import`)
 - **Human-as-lead-coder**: Optionally code as a full third coder alongside the two LLMs for 3-way IRR, reducing correlated LLM bias
 - **Calibration**: Structured rounds to align coders before full analysis, with optional 3-way calibration (`--include-supervisor`)
 - **Independent coding**: Agents code without seeing each other's work. The supervisor can code all segments or a representative sample (`--sample-size`)
+- **Deductive coding mode**: Strict codebook adherence with `--deductive` for theory-driven research
 - **Inter-rater reliability**: Krippendorff's alpha (2-way and 3-way), pairwise Cohen's kappa, percent agreement
 - **Flag & discussion system**: Ambiguous cases surface for structured debate
 - **Analytical memos**: Write theoretical/methodological notes throughout
 - **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
-- **Full replication package**: Every prompt, response, and decision is exportable
+- **Multiple model providers**: Ollama (local), OpenAI, Anthropic — mix and match across coders
+- **Full replication package**: Every prompt, response, decision, and prompt hash is exportable
 - **Supports multiple methodologies**: Grounded theory, thematic analysis, content analysis
 
 ---
@@ -39,9 +42,13 @@ All model calls are logged with full prompts, responses, model versions, tempera
 # Install polyphony
 pip install polyphony
 
-# Install Ollama (see https://ollama.ai)
-# Then pull a model:
+# For local models: install Ollama (https://ollama.ai) and pull a model
 ollama pull llama3.1:8b
+
+# For cloud APIs (optional):
+pip install polyphony[openai]      # OpenAI / Azure OpenAI
+pip install polyphony[anthropic]   # Anthropic (Claude)
+pip install polyphony[all-providers]  # Both
 ```
 
 ### 2. Create a project
@@ -57,10 +64,21 @@ To choose the LLMs used for the two coders when creating a project, pass the `--
 `--model-b` flags to `polyphony project new`. Example:
 
 ```bash
+# Local models (Ollama, default)
 polyphony project new --name "My Study" --model-a llama3.1:8b --model-b llama3.2:3b
+
+# Cloud models
+polyphony project new --name "My Study" \
+  --provider-a openai --model-a gpt-4o \
+  --provider-b anthropic --model-b claude-sonnet-4-5-20250514
+
+# Mix local and cloud for greater independence
+polyphony project new --name "My Study" \
+  --provider-a ollama --model-a llama3.1:8b \
+  --provider-b openai --model-b gpt-4o
 ```
 
-The default models are `llama3.1:8b` for both coders unless overridden.
+The default is `llama3.1:8b` via Ollama for both coders.
 
 ### 3. Import your data
 
@@ -82,18 +100,20 @@ polyphony data import photos/*.jpg
 polyphony data import screenshots/*.png diagrams/*.webp
 ```
 
-### 4. Induce a codebook
+### 4. Build or import a codebook
+
+**Inductive** (generate codes from data):
 
 ```bash
-polyphony codebook induce --sample-size 20
+polyphony codebook induce --sample-size 20          # AIs propose codes from a sample
+polyphony codebook induce --human-leads              # you propose codes first
 ```
 
-Both AIs read a 20-segment sample and propose codes. You review each candidate: accept, reject, rename, or edit definitions.
-
-To lead codebook development yourself (proposing codes before seeing LLM suggestions):
+**Deductive** (import a pre-existing codebook):
 
 ```bash
-polyphony codebook induce --human-leads
+polyphony codebook import my_framework.yaml          # YAML, JSON, or CSV
+polyphony codebook import --finalize theory_codes.csv # import and finalize in one step
 ```
 
 ### 5. Calibrate your coders
@@ -113,7 +133,8 @@ polyphony calibrate run --include-supervisor
 ### 6. Run independent coding
 
 ```bash
-polyphony code run
+polyphony code run                                 # inductive (default)
+polyphony code run --deductive                     # deductive (strict codebook adherence)
 ```
 
 Both agents code the full corpus independently. Neither sees the other's work.
@@ -215,6 +236,60 @@ For large corpora, the sample mode is recommended. Krippendorff's alpha natively
 
 ---
 
+## Deductive Coding
+
+For theory-driven research where the codebook is established before data collection, polyphony supports a deductive workflow:
+
+1. **Import your codebook** from YAML, JSON, or CSV:
+
+```bash
+polyphony codebook import populism_framework.yaml --finalize
+```
+
+The import format matches what `polyphony export codebook` produces:
+
+```yaml
+codes:
+  - name: POPULIST_RHETORIC
+    level: open
+    description: Speaker uses populist framing (us vs them, anti-elite)
+    inclusion_criteria: "Anti-elite language, people vs establishment"
+    exclusion_criteria: "Policy disagreement without populist framing"
+```
+
+2. **Run coding in deductive mode**:
+
+```bash
+polyphony code run --deductive
+```
+
+In deductive mode, the AI coders are instructed to apply the codebook strictly — they will not suggest new codes or flag missing categories. This is appropriate when your codebook represents a theoretical framework rather than an emergent coding scheme.
+
+---
+
+## Cloud API Models
+
+polyphony supports OpenAI-compatible APIs and Anthropic alongside local Ollama models. This is useful for:
+
+- **Larger, more capable models** (GPT-4o, Claude) that may code more accurately
+- **Faster processing** of large corpora via cloud inference
+- **Cross-provider independence** — using different providers for Coder A and Coder B tests whether results depend on a specific model architecture
+
+```bash
+# Set API keys
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Create project with cloud models
+polyphony project new --name "My Study" \
+  --provider-a openai --model-a gpt-4o \
+  --provider-b anthropic --model-b claude-sonnet-4-5-20250514
+```
+
+**Privacy note:** When using cloud APIs, your data is sent to external servers. Ensure you have appropriate data-sharing agreements and IRB approval. For sensitive data, use Ollama (which runs entirely locally).
+
+---
+
 ## Project Directory Structure
 
 Each project is stored in `~/.polyphony/projects/<slug>/`:
@@ -242,6 +317,7 @@ polyphony data list            List imported documents
 polyphony data show            Display a document or its segments
 
 polyphony codebook induce      AI-assisted codebook induction (--human-leads)
+polyphony codebook import      Import codebook from YAML/JSON/CSV (--finalize)
 polyphony codebook show        Display codebook as a tree
 polyphony codebook add         Add a code manually
 polyphony codebook edit        Edit a code in $EDITOR
@@ -250,7 +326,7 @@ polyphony codebook history     Show all codebook versions
 
 polyphony calibrate run        Run calibration round(s) (--include-supervisor)
 
-polyphony code run             Run independent coding (--agent all, --sample-size)
+polyphony code run             Run independent coding (--agent all, --sample-size, --deductive)
 polyphony code status          Show coding progress
 polyphony code show            Show codes for a specific segment
 
@@ -303,8 +379,10 @@ The `.polyphony_project` file in your working directory remembers which project 
 ## Requirements
 
 - Python 3.10+
-- [Ollama](https://ollama.ai) running locally with at least one model installed
-- ~4 GB RAM per model (less for quantized versions)
+- At least one model provider:
+  - **Ollama** (default): [ollama.ai](https://ollama.ai) running locally, ~4 GB RAM per model
+  - **OpenAI**: API key in `OPENAI_API_KEY` environment variable
+  - **Anthropic**: API key in `ANTHROPIC_API_KEY` environment variable
 
 ### Python dependencies
 
@@ -312,10 +390,13 @@ The `.polyphony_project` file in your working directory remembers which project 
 click, rich, pydantic, ollama, krippendorff, scikit-learn, numpy, pandas, PyYAML, python-docx
 ```
 
-**Optional** (for image metadata extraction):
+**Optional**:
 
 ```bash
-pip install polyphony[images]   # installs Pillow>=10.0
+pip install polyphony[images]          # Pillow for image metadata
+pip install polyphony[openai]          # OpenAI API support
+pip install polyphony[anthropic]       # Anthropic API support
+pip install polyphony[all-providers]   # All cloud providers
 ```
 
 ---
@@ -357,11 +438,12 @@ ollama serve 2>&1 | tee ollama.log
 ## Replicability
 
 Every AI coding decision is logged with:
-- **Model name and digest** (exact model weights, via Ollama manifest)
-- **Seed and temperature** (for deterministic reproduction)
+- **Model name and digest** (exact model weights via Ollama, or model ID for cloud APIs)
+- **Seed and temperature** (for deterministic reproduction where supported)
 - **Full system and user prompts** (including the complete codebook version)
+- **Prompt hash** (SHA-256 of combined prompts for prompt sensitivity tracking)
 - **Full response text** and parsed output
-- **Timestamps**
+- **Timestamps and duration**
 
 The `polyphony export replication` command packages all of this into a self-contained directory with scripts to verify checksums and re-run individual calls.
 
@@ -374,7 +456,8 @@ All prompts are in the `polyphony/prompt_templates/` directory as editable YAML 
 ```
 polyphony/prompt_templates/
 ├── codebook_induction.yaml  # How AIs generate candidate codes
-├── open_coding.yaml         # How AIs assign codes to segments
+├── open_coding.yaml         # How AIs assign codes to segments (inductive)
+├── deductive_coding.yaml    # How AIs assign codes strictly (deductive)
 ├── discussion.yaml          # How AIs explain disagreements
 └── memo_synthesis.yaml      # How AIs synthesise themes
 ```

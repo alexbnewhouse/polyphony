@@ -21,6 +21,7 @@ Prompt YAML structure:
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from string import Template
@@ -125,8 +126,6 @@ class PromptLibrary:
 
 
 # Module-level singleton; can be overridden with POLYPHONY_PROMPTS_DIR env var
-import os
-
 _prompts_dir_env = os.environ.get("POLYPHONY_PROMPTS_DIR")
 library = PromptLibrary(Path(_prompts_dir_env) if _prompts_dir_env else None)
 

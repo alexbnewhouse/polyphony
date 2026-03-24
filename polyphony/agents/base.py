@@ -9,15 +9,53 @@ full audit trail and replicability regardless of agent type.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..db import insert, json_col
+
+
+def parse_json(text: str) -> Dict[str, Any]:
+    """
+    Extract and parse the first JSON object or array from LLM response text.
+
+    Tries three strategies in order:
+    1. Direct ``json.loads`` on the full text.
+    2. Extract content from markdown code fences (```json ... ```).
+    3. Find the first ``{ ... }`` block via regex.
+
+    Returns an empty dict on failure so callers always get a dict back.
+    """
+    import re
+
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to extract JSON block from markdown code fences
+    match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Try to find the first { ... } block
+    match = re.search(r"\{[\s\S]+\}", text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    return {}
 
 
 class BaseAgent(ABC):
@@ -136,6 +174,11 @@ class BaseAgent(ABC):
         input_tokens: Optional[int] = None,
         output_tokens: Optional[int] = None,
     ) -> int:
+        # Hash system+user prompt for prompt sensitivity tracking
+        prompt_hash = hashlib.sha256(
+            (system_prompt + "\n---\n" + user_prompt).encode("utf-8")
+        ).hexdigest()
+
         row = {
             "project_id": self.project_id,
             "agent_id": self.agent_id,
@@ -153,13 +196,19 @@ class BaseAgent(ABC):
             "duration_ms": duration_ms,
             "error": error,
             "called_at": datetime.now(timezone.utc).isoformat(),
+            "prompt_hash": prompt_hash,
         }
         call_id = insert(self._conn, "llm_call", row)
         self._conn.commit()
         return call_id
 
+    _ALLOWED_LINK_COLUMNS = frozenset({"assignment_id", "segment_id", "code_id"})
+
     def update_call_link(self, call_id: int, **links) -> None:
         """Link an llm_call row to the downstream record it produced."""
+        for k in links:
+            if k not in self._ALLOWED_LINK_COLUMNS:
+                raise ValueError(f"Invalid link column: '{k}'")
         setters = ", ".join(f"{k} = ?" for k in links)
         self._conn.execute(
             f"UPDATE llm_call SET {setters} WHERE id = ?",

@@ -154,15 +154,26 @@ _ALLOWED_TABLES = frozenset({
     "flag", "discussion_turn", "memo", "schema_migration",
 })
 
+# Column names must be valid SQL identifiers (alphanumeric + underscore).
+_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def _validate_table(table: str) -> None:
     if table not in _ALLOWED_TABLES:
         raise ValueError(f"Invalid table name: '{table}'")
 
 
+def _validate_columns(columns: list[str]) -> None:
+    """Reject column names that are not valid SQL identifiers."""
+    for col in columns:
+        if not _COLUMN_RE.match(col):
+            raise ValueError(f"Invalid column name: '{col}'")
+
+
 def insert(conn: sqlite3.Connection, table: str, data: dict) -> int:
     """Insert a row and return the new rowid."""
     _validate_table(table)
+    _validate_columns(list(data.keys()))
     cols = ", ".join(data.keys())
     placeholders = ", ".join("?" for _ in data)
     cursor = conn.execute(
@@ -174,6 +185,7 @@ def insert(conn: sqlite3.Connection, table: str, data: dict) -> int:
 def update(conn: sqlite3.Connection, table: str, data: dict, where: str, params: tuple) -> None:
     """Update rows in table."""
     _validate_table(table)
+    _validate_columns(list(data.keys()))
     setters = ", ".join(f"{k} = ?" for k in data)
     conn.execute(f"UPDATE {table} SET {setters} WHERE {where}", tuple(data.values()) + params)
 

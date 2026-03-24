@@ -14,6 +14,8 @@ class AgentRole(str, Enum):
 class AgentType(str, Enum):
     human = "human"
     llm = "llm"
+    openai = "openai"
+    anthropic = "anthropic"
 
 
 class Agent(BaseModel):

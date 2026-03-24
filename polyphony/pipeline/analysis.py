@@ -143,8 +143,10 @@ def co_occurrence_matrix(
         codes_list = sorted(codes_set)  # sorted for determinism
         for i, ca in enumerate(codes_list):
             for cb in codes_list[i + 1:]:
-                matrix.setdefault(ca, {})[cb] = matrix.get(ca, {}).get(cb, 0) + 1
-                matrix.setdefault(cb, {})[ca] = matrix.get(cb, {}).get(ca, 0) + 1
+                row_a = matrix.setdefault(ca, {})
+                row_a[cb] = row_a.get(cb, 0) + 1
+                row_b = matrix.setdefault(cb, {})
+                row_b[ca] = row_b.get(ca, 0) + 1
 
     return matrix
 

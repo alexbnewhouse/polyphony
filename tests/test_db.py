@@ -28,8 +28,8 @@ def test_migrations_run_once(db_path):
         conn = connect(db_path)
         versions = fetchall(conn, "SELECT * FROM schema_migration")
         conn.close()
-    # Should have exactly 3 migrations applied (001_initial, 002_image_support, 003_human_coder)
-    assert len(versions) == 3
+    # Should have exactly 4 migrations applied (001–004)
+    assert len(versions) == 4
 
 
 def test_insert_and_fetchone(conn):

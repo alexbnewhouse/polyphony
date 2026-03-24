@@ -13,6 +13,7 @@ class CodeLevel(str, Enum):
 
 class CodebookStage(str, Enum):
     draft = "draft"
+    imported = "imported"
     calibrated = "calibrated"
     final = "final"
 

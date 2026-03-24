@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Document(BaseModel):
@@ -14,7 +14,7 @@ class Document(BaseModel):
     char_count: int
     word_count: int
     status: str = "imported"
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
     imported_at: Optional[datetime] = None
     media_type: str = "text"  # "text" or "image"
     image_path: Optional[str] = None

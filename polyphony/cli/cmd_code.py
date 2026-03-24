@@ -41,8 +41,10 @@ def code():
               help="Human codes N randomly sampled segments (LLMs code everything)")
 @click.option("--sample-seed", default=42, show_default=True, type=int,
               help="Random seed for human sample selection")
+@click.option("--deductive", is_flag=True, default=False,
+              help="Use deductive (theory-driven) coding prompt instead of open coding")
 @click.pass_context
-def run(ctx, agent, resume, calibration_only, sample_size, sample_seed):
+def run(ctx, agent, resume, calibration_only, sample_size, sample_seed, deductive):
     """
     Run independent coding: each agent codes every segment using the codebook.
 
@@ -86,6 +88,7 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed):
     from ..pipeline.coding import run_coding_session
     import random
 
+    prompt_key = "deductive_coding" if deductive else "open_coding"
     run_type = "calibration" if calibration_only else "independent"
 
     if agent in ("a", "both", "all"):
@@ -93,6 +96,7 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed):
             conn=conn, project=project, agent=agent_a,
             codebook_version_id=cb["id"],
             run_type=run_type, resume=resume,
+            prompt_key=prompt_key,
         )
 
     if agent in ("b", "both", "all"):
@@ -100,6 +104,7 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed):
             conn=conn, project=project, agent=agent_b,
             codebook_version_id=cb["id"],
             run_type=run_type, resume=resume,
+            prompt_key=prompt_key,
         )
 
     if agent in ("supervisor", "all"):
@@ -135,6 +140,7 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed):
             codebook_version_id=cb["id"],
             run_type=run_type, resume=resume,
             segments=sup_segments,
+            prompt_key=prompt_key,
         )
 
     if not calibration_only:

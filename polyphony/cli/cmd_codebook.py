@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -82,6 +84,112 @@ def induce(ctx, sample_size, agent, human_leads):
         supervisor_agent=supervisor,
     )
     conn.close()
+
+
+@codebook.command("import", name="import")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--finalize", is_flag=True, default=False,
+              help="Mark the imported codebook as final immediately")
+@click.pass_context
+def import_codebook(ctx, file, finalize):
+    """
+    Import a pre-existing codebook from a YAML, JSON, or CSV file.
+
+    This supports deductive (theory-driven) coding workflows where the
+    codebook is defined before data analysis begins.
+
+    The YAML/JSON format should contain a 'codes' list, matching the
+    format produced by `polyphony export codebook`.
+
+    \b
+    Examples:
+        polyphony codebook import codebook.yaml
+        polyphony codebook import codebook.json --finalize
+        polyphony codebook import codebook.csv
+    """
+    db_path = ctx.obj.get("db_path")
+    if not db_path:
+        console.print("[red]No active project.[/]")
+        sys.exit(1)
+
+    file_path = Path(file)
+    suffix = file_path.suffix.lower()
+
+    # Parse the file
+    try:
+        if suffix in (".yaml", ".yml"):
+            data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+            codes = data.get("codes", data) if isinstance(data, dict) else data
+        elif suffix == ".json":
+            data = json.loads(file_path.read_text(encoding="utf-8"))
+            codes = data.get("codes", data) if isinstance(data, dict) else data
+        elif suffix == ".csv":
+            with file_path.open("r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                codes = list(reader)
+        else:
+            console.print(f"[red]Unsupported file format: {suffix}[/]")
+            console.print("Supported formats: .yaml, .yml, .json, .csv")
+            sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Failed to parse {file_path.name}: {e}[/]")
+        sys.exit(1)
+
+    if not isinstance(codes, list) or len(codes) == 0:
+        console.print("[red]No codes found in the file.[/]")
+        sys.exit(1)
+
+    # Validate and normalise codes
+    validated = []
+    for i, code in enumerate(codes):
+        name = code.get("name", "").strip()
+        if not name:
+            console.print(f"[red]Code at index {i} has no name — skipping.[/]")
+            continue
+        validated.append({
+            "name": name.upper(),
+            "description": code.get("description", ""),
+            "level": code.get("level", "open"),
+            "inclusion_criteria": code.get("inclusion_criteria") or None,
+            "exclusion_criteria": code.get("exclusion_criteria") or None,
+            "example_quotes": code.get("example_quotes", []),
+        })
+
+    if not validated:
+        console.print("[red]No valid codes found after parsing.[/]")
+        sys.exit(1)
+
+    conn = connect(db_path)
+    project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+
+    # Find next version number
+    existing = fetchone(
+        conn,
+        "SELECT MAX(version) as v FROM codebook_version WHERE project_id = ?",
+        (project["id"],),
+    )
+    next_version = (existing["v"] or 0) + 1
+
+    from ..pipeline.induction import save_codebook_version
+
+    stage = "final" if finalize else "imported"
+    rationale = f"Imported from {file_path.name}"
+
+    cb_id = save_codebook_version(
+        conn,
+        project_id=project["id"],
+        codes=validated,
+        version=next_version,
+        stage=stage,
+        rationale=rationale,
+    )
+
+    conn.close()
+
+    console.print(
+        f"[green]Imported {len(validated)} codes as codebook v{next_version} "
+        f"(stage={stage}).[/]"
+    )
 
 
 @codebook.command("show")
@@ -229,7 +337,7 @@ def edit_code(ctx, code_name):
         tmp_path = f.name
 
     editor = os.environ.get("EDITOR", "nano")
-    subprocess.run([editor, tmp_path], check=True)
+    subprocess.run(shlex.split(editor) + [tmp_path], check=True)
 
     updated = yaml.safe_load(Path(tmp_path).read_text())
     Path(tmp_path).unlink()

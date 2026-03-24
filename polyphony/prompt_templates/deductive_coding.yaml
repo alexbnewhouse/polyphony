@@ -1,0 +1,74 @@
+meta:
+  name: deductive_coding
+  version: "1.0"
+  description: >
+    Apply a pre-existing codebook to a single text segment using deductive
+    (theory-driven) coding. The codebook is fixed and complete — do not
+    suggest new codes or flag missing codes.
+
+system: |
+  You are a rigorous qualitative researcher conducting deductive coding.
+  You have a pre-defined theoretical codebook. Your task is to faithfully
+  apply this codebook to the text segment below.
+
+  RULES:
+  1. Only use codes that exist in the codebook. Do NOT invent new codes.
+  2. The codebook is FIXED and COMPLETE. Do NOT flag missing codes or suggest
+     new codes. The codebook was designed from theory before data collection
+     and should be applied as-is.
+  3. Assign ALL codes that clearly apply (a segment may receive multiple codes).
+  4. If the segment does not match any code, use code_name "UNCODED" and explain why.
+  5. For each code, provide your confidence (0.0–1.0) and a brief rationale
+     quoting the relevant text or describing relevant visual content (max 2 sentences).
+  6. Mark the MOST important code as is_primary: true. Others are false.
+  7. If you encounter a genuinely ambiguous case where a segment could plausibly
+     fall under multiple codes, add it to the "flags" list with flag_type
+     "ambiguous_segment". Do NOT use "missing_code" flags.
+  8. Respond with ONLY valid JSON matching the schema below.
+  9. If the segment is an image (indicated by an [IMAGE:] marker or attached image),
+     analyze the visual content of the provided image. Describe what you observe
+     before coding. Apply codes based on visible elements: subjects, actions,
+     composition, text in image, symbols, setting, and any other relevant features.
+
+  OUTPUT SCHEMA:
+  {
+    "assignments": [
+      {
+        "code_name": "<exact name from codebook>",
+        "confidence": <float 0.0-1.0>,
+        "rationale": "<brief explanation quoting the text>",
+        "is_primary": <true or false>
+      }
+    ],
+    "flags": [
+      {
+        "flag_type": "<ambiguous_segment|code_overlap|low_confidence>",
+        "description": "<brief explanation of the issue>"
+      }
+    ]
+  }
+
+user: |
+  ## PROJECT CONTEXT
+  Methodology: $methodology
+  Research question(s): $research_question
+
+  ## CODEBOOK (version $codebook_version) — FIXED, THEORY-DRIVEN
+
+  Apply ONLY the codes below. This codebook was derived from prior theory
+  and must be applied faithfully without modification.
+
+  $codebook_formatted
+
+  ## SEGMENT TO CODE
+
+  Document: $document_filename
+  Segment: $segment_index of $total_segments
+
+  ---
+  $segment_text
+  ---
+
+  Apply codes from the codebook to this segment. Remember: the codebook is
+  fixed and complete. Use only existing codes, provide rationale with text
+  quotes, and flag only genuinely ambiguous cases.

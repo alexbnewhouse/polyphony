@@ -12,8 +12,6 @@ Replicability notes:
 
 from __future__ import annotations
 
-import json
-import re
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,7 +20,7 @@ try:
 except ImportError:
     _ollama = None  # type: ignore[assignment]
 
-from .base import BaseAgent
+from .base import BaseAgent, parse_json
 
 
 def get_model_digest(model_name: str, host: str = "http://localhost:11434") -> str:
@@ -133,37 +131,8 @@ class OllamaAgent(BaseAgent):
             ) from e
 
         raw = response.message.content or ""
-        parsed = self._parse_json(raw)
+        parsed = parse_json(raw)
         return raw, parsed
-
-    def _parse_json(self, text: str) -> Dict[str, Any]:
-        """
-        Extract and parse the first JSON object or array from the response.
-        Returns empty dict on failure.
-        """
-        # Try direct parse first
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Try to extract JSON block from markdown code fences
-        match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        # Try to find the first { ... } block
-        match = re.search(r"\{[\s\S]+\}", text)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
-
-        return {}
 
     def is_available(self) -> bool:
         """Return True if the Ollama server is reachable and the model is available."""

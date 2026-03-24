@@ -40,13 +40,14 @@ def code_segment(
     conn: sqlite3.Connection,
     document_name: str = "unknown",
     total_segments: int = 1,
+    prompt_key: str = "open_coding",
 ) -> List[dict]:
     """
     Have an agent code a single segment.
     Returns a list of assignment dicts with confidence, rationale, flags.
     Saves assignments to DB.
     """
-    tmpl = prompt_lib["open_coding"]
+    tmpl = prompt_lib[prompt_key]
     codebook_text = format_codebook(codes)
 
     research_questions = json.loads(project.get("research_questions") or "[]")
@@ -163,6 +164,7 @@ def run_coding_session(
     run_type: str = "independent",
     segments: Optional[List[dict]] = None,
     resume: bool = False,
+    prompt_key: str = "open_coding",
 ) -> int:
     """
     Run a full coding session (or resume an interrupted one).
@@ -289,6 +291,7 @@ def run_coding_session(
                 conn=conn,
                 document_name=doc_name,
                 total_segments=len(segments),
+                prompt_key=prompt_key,
             )
             progress.advance(task)
 

@@ -38,20 +38,34 @@ def project():
     "--model-a",
     default="llama3.1:8b",
     show_default=True,
-    help="Ollama model for Coder A",
+    help="Model for Coder A (e.g. 'llama3.1:8b', 'gpt-4o', 'claude-sonnet-4-5-20250514')",
 )
 @click.option(
     "--model-b",
     default="llama3.1:8b",
     show_default=True,
-    help="Ollama model for Coder B (can be same model, different seed)",
+    help="Model for Coder B (can be same model, different seed)",
+)
+@click.option(
+    "--provider-a",
+    type=click.Choice(["ollama", "openai", "anthropic"]),
+    default="ollama",
+    show_default=True,
+    help="LLM provider for Coder A",
+)
+@click.option(
+    "--provider-b",
+    type=click.Choice(["ollama", "openai", "anthropic"]),
+    default="ollama",
+    show_default=True,
+    help="LLM provider for Coder B",
 )
 @click.option("--seed-a", default=42, show_default=True, help="Random seed for Coder A")
 @click.option("--seed-b", default=137, show_default=True, help="Random seed for Coder B")
 @click.option("--temperature", "-t", default=0.1, show_default=True,
               type=click.FloatRange(0.0, 1.0), help="LLM temperature (0=deterministic, 1=creative)")
 @click.pass_context
-def new(ctx, name, description, methodology, model_a, model_b, seed_a, seed_b, temperature):
+def new(ctx, name, description, methodology, model_a, model_b, provider_a, provider_b, seed_a, seed_b, temperature):
     """
     Create a new QDA project.
 
@@ -108,11 +122,14 @@ def new(ctx, name, description, methodology, model_a, model_b, seed_a, seed_b, t
         "system_prompt": "Human supervisor",
     })
 
+    # Map CLI provider names to agent_type values stored in DB
+    _PROVIDER_TO_AGENT_TYPE = {"ollama": "llm", "openai": "openai", "anthropic": "anthropic"}
+
     # Coder A
     insert(conn, "agent", {
         "project_id": project_id,
         "role": "coder_a",
-        "agent_type": "llm",
+        "agent_type": _PROVIDER_TO_AGENT_TYPE[provider_a],
         "model_name": model_a,
         "model_version": "unknown",
         "temperature": temperature,
@@ -124,7 +141,7 @@ def new(ctx, name, description, methodology, model_a, model_b, seed_a, seed_b, t
     insert(conn, "agent", {
         "project_id": project_id,
         "role": "coder_b",
-        "agent_type": "llm",
+        "agent_type": _PROVIDER_TO_AGENT_TYPE[provider_b],
         "model_name": model_b,
         "model_version": "unknown",
         "temperature": temperature,
@@ -144,8 +161,8 @@ def new(ctx, name, description, methodology, model_a, model_b, seed_a, seed_b, t
             f"  Name:        {name}\n"
             f"  Slug:        {slug}  [dim](used to reopen: polyphony project open {slug})[/]\n"
             f"  Methodology: {methodology}\n"
-            f"  Coder A:     {model_a} (seed={seed_a})\n"
-            f"  Coder B:     {model_b} (seed={seed_b})\n"
+            f"  Coder A:     {model_a} via {provider_a} (seed={seed_a})\n"
+            f"  Coder B:     {model_b} via {provider_b} (seed={seed_b})\n"
             f"  DB:          {db_path}\n\n"
             f"Next step: [bold]polyphony data import <files...>[/]",
             title="[bold cyan]polyphony[/]",
@@ -222,8 +239,7 @@ def status(ctx):
         conn.close()
         return
 
-    import json as _json
-    rqs = _json.loads(p.get("research_questions") or "[]")
+    rqs = json.loads(p.get("research_questions") or "[]")
 
     n_docs = fetchone(conn, "SELECT COUNT(*) AS n FROM document WHERE project_id = ?", (p["id"],))["n"]
     n_segs = fetchone(conn, "SELECT COUNT(*) AS n FROM segment WHERE project_id = ?", (p["id"],))["n"]

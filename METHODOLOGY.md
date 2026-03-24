@@ -67,7 +67,10 @@ so IRR is computed on the intersection of segments coded by all three.
 
 ## Inductive vs. Deductive Coding
 
-polyphony prioritises **inductive** (bottom-up) codebook development:
+polyphony supports both **inductive** (bottom-up) and **deductive** (top-down)
+codebook development:
+
+### Inductive coding
 
 1. Agents read a sample of the data and propose codes grounded in what they observe.
 2. The human researcher reviews and refines these proposals.
@@ -81,8 +84,24 @@ limited to accepting or rejecting LLM proposals.
 This follows the logic of Grounded Theory (Glaser & Strauss 1967; Charmaz 2006)
 and Reflexive Thematic Analysis (Braun & Clarke 2022).
 
-Deductive coding (starting from a pre-existing codebook) is also supported:
-use `polyphony codebook add` to enter codes directly, skipping the induction step.
+### Deductive coding
+
+For theory-driven research, polyphony supports importing a pre-existing codebook
+directly from YAML, JSON, or CSV:
+
+```bash
+polyphony codebook import my_codebook.yaml
+polyphony codebook import --finalize theoretical_framework.csv
+```
+
+When used with `polyphony code run --deductive`, the AI coders apply the imported
+codebook strictly — they are instructed not to suggest new codes or flag missing
+categories. This is appropriate when the codebook represents a theoretical
+framework established prior to data collection (e.g., a validated coding scheme
+from prior literature, or a content analysis framework).
+
+The deductive workflow follows the logic of directed content analysis
+(Hsieh & Shannon 2005) and deductive thematic analysis (Braun & Clarke 2022).
 
 ---
 
@@ -160,6 +179,94 @@ polyphony enforces this at the software level:
 
 ---
 
+## Prompt Sensitivity
+
+AI coding decisions are sensitive to prompt wording. polyphony treats prompts
+as methodological decisions and provides several mechanisms for transparency:
+
+### How polyphony tracks prompt changes
+
+1. **Full prompt logging.** Every LLM call records the complete system and
+   user prompt in the `llm_call` table. The replication package includes all
+   prompts as-sent.
+
+2. **Prompt hashing.** Each LLM call records a SHA-256 hash of the combined
+   system+user prompt. This allows researchers to verify that all coding calls
+   used identical prompts — or to identify exactly when a prompt change occurred.
+
+3. **Prompt template snapshots.** The replication package includes copies of
+   all `.yaml` prompt templates as they existed at export time.
+
+### Recommendations for managing prompt sensitivity
+
+- **Freeze prompts before coding.** Edit prompt templates during calibration
+  but do not change them between calibration and independent coding. If you do,
+  re-calibrate.
+- **Report prompt templates.** Include the exact templates in supplementary
+  materials. Prompt wording is a methodological decision comparable to interview
+  question design.
+- **Run sensitivity checks.** If resources permit, run the same corpus with
+  a minor prompt variation (e.g., rephrasing instructions) and compare IRR.
+  A robust codebook should produce similar results across reasonable prompt
+  variations.
+- **Use deductive mode for stability.** The deductive coding prompt
+  (`--deductive`) is deliberately simpler and more constrained than the inductive
+  prompt, reducing the surface area for prompt sensitivity.
+- **Compare across models.** Using different models for Coder A and Coder B
+  (e.g., Llama vs Mistral) tests whether results depend on a specific model's
+  interpretation of the prompt.
+
+### What prompt sensitivity means for validity
+
+High IRR across prompt variations or model combinations strengthens the claim
+that the codebook — not the prompt wording — is driving coding decisions.
+Conversely, if minor prompt changes substantially alter results, the codebook
+may be under-specified and needs refinement.
+
+---
+
+## Scale and Performance
+
+### Corpus size guidelines
+
+polyphony processes segments sequentially per agent to avoid GPU contention
+and keep SQLite writes simple. Practical performance depends on model size,
+hardware, and segment length.
+
+| Corpus size | Segments | Approximate time (8B model, GPU) | Notes |
+|------------|----------|----------------------------------|-------|
+| Small | < 200 | Minutes | Full 3-way human coding practical |
+| Medium | 200–2,000 | 1–4 hours | Use `--sample-size` for human coding |
+| Large | 2,000–10,000 | 4–24 hours | Consider smaller/faster models |
+| Very large | > 10,000 | Days | Batch in stages; use quantized models |
+
+### Practical tips for large corpora
+
+- **Use sampling for human coding.** With `--sample-size 50`, the human codes
+  50 randomly selected segments while LLMs code everything. Krippendorff's alpha
+  handles partial data natively.
+- **Use smaller models for calibration.** Calibrate with a fast model
+  (e.g., `llama3.2:3b`), then switch to a larger model for independent coding.
+- **Batch by document.** For very large corpora, import and code in batches
+  to manage memory and allow incremental review.
+- **Monitor with `polyphony code status`.** Track coding progress per agent
+  and estimate remaining time from completed segments.
+- **Use `--resume` for interrupted runs.** If a coding session is interrupted
+  (e.g., by a machine restart), `polyphony code run --resume` picks up where
+  it left off without re-coding completed segments.
+- **Use cloud APIs for speed.** With `--provider-a openai --model-a gpt-4o`,
+  API-based models can be significantly faster than local inference for large
+  corpora.
+
+### Database performance
+
+polyphony uses SQLite with WAL (Write-Ahead Logging) mode. The database can
+comfortably handle projects with 100,000+ segments and millions of assignment
+rows. Queries remain fast because indexes are defined on all frequently-joined
+columns.
+
+---
+
 ## Limitations
 
 1. **AI coders are not human coders.** Language models do not have lived
@@ -170,10 +277,11 @@ polyphony enforces this at the software level:
 
 2. **Prompt sensitivity.** AI coding decisions depend heavily on prompt wording.
    Prompts should be treated as methodological choices and reported as such.
-   polyphony stores all prompt text for this reason.
+   polyphony stores all prompt text and prompt hashes for this reason.
+   See the Prompt Sensitivity section above.
 
 3. **Model version matters.** The same model name (e.g. "llama3.1") may refer
-   to different weights at different times. polyphony records the Ollama manifest
+   to different weights at different times. polyphony records the model
    digest to ensure exact reproducibility.
 
 4. **Saturation is approximate.** The saturation check in polyphony is a heuristic
@@ -181,8 +289,14 @@ polyphony enforces this at the software level:
    about when the corpus is sufficient.
 
 5. **Confidentiality.** Ollama runs locally — your data never leaves your machine.
-   However, if you use a cloud API instead, ensure you have appropriate
-   data-sharing agreements.
+   When using cloud API providers (OpenAI, Anthropic), your data is sent to
+   external servers. Ensure you have appropriate data-sharing agreements and
+   IRB approval before using cloud APIs with sensitive data.
+
+6. **Seed behaviour varies by provider.** Ollama's seed support varies by model.
+   OpenAI's seed parameter is best-effort. Anthropic does not support seeds.
+   polyphony records the seed setting regardless, but exact reproducibility
+   depends on the provider and model.
 
 ---
 
@@ -190,13 +304,17 @@ polyphony enforces this at the software level:
 
 When reporting findings from a polyphony-assisted study, we recommend including:
 
-- Model name and version (digest) for both coders
+- Model name, version (digest), and provider for both coders
+- Whether coding was inductive or deductive (`--deductive`)
 - Prompt templates used (include in supplementary materials or replication package)
 - Temperature and seed settings
 - IRR metrics (α, κ, % agreement) at each stage — including 3-way alpha and pairwise kappas if the human coded as a third coder
 - If the human coded a sample rather than the full corpus, the sample size, seed, and the number of segments in the IRR intersection
 - Number of calibration rounds and how disagreements were resolved
+- Corpus size (documents, segments) and approximate processing time
+- Any prompt modifications made during the study
 - A statement on the role of AI coders vs. human judgment in the final analysis
+- For deductive studies: the source and validation status of the imported codebook
 
 ---
 
@@ -211,6 +329,7 @@ When reporting findings from a polyphony-assisted study, we recommend including:
 | **Code** | A label applied to a segment that captures a concept, theme, or pattern. Codes have names, descriptions, and optional inclusion/exclusion criteria. |
 | **Codebook** | The complete set of codes with their definitions. polyphony tracks multiple versions as the codebook evolves during analysis. |
 | **Codebook induction** | The process of generating candidate codes from the data rather than specifying them in advance. polyphony supports both LLM-assisted induction and human-led induction (`--human-leads`). |
+| **Deductive coding** | Applying a pre-existing theoretical codebook to data, as opposed to generating codes from the data. Enabled with `polyphony codebook import` and `polyphony code run --deductive`. |
 | **Flag** | A marker on a segment indicating it needs attention — because of ambiguity, a coder disagreement, or a supervisor note. |
 | **Grounded theory** | A methodology in which theory is developed inductively from the data through open, axial, and selective coding. |
 | **Inter-rater reliability (IRR)** | A measure of how consistently coders have applied the same codes to the same data. polyphony reports Krippendorff's alpha (primary, 2-way and 3-way), pairwise Cohen's kappa, and percent agreement. |
@@ -235,6 +354,9 @@ Braun, V., & Clarke, V. (2022). *Thematic Analysis: A Practical Guide*. SAGE.
 Charmaz, K. (2006). *Constructing Grounded Theory*. SAGE.
 
 Glaser, B. G., & Strauss, A. L. (1967). *The Discovery of Grounded Theory*. Aldine.
+
+Hsieh, H.-F., & Shannon, S. E. (2005). Three approaches to qualitative content
+analysis. *Qualitative Health Research*, 15(9), 1277–1288.
 
 Krippendorff, K. (2004). *Content Analysis: An Introduction to Its Methodology* (2nd ed.). SAGE.
 
