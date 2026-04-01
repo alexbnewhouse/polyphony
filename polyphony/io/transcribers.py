@@ -86,10 +86,20 @@ def _probe_duration_seconds(path: Path) -> Optional[float]:
         return None
 
 
-def store_audio_file(source_path: Path, audio_dir: Path) -> Dict[str, Any]:
+def store_audio_file(
+    source_path: Path,
+    audio_dir: Path,
+    max_bytes: int = _DEFAULT_MAX_AUDIO_BYTES,
+) -> Dict[str, Any]:
     """Copy an audio file into the project and return provenance metadata."""
     source_path = Path(source_path)
     audio_dir = Path(audio_dir)
+
+    file_size = source_path.stat().st_size
+    if file_size > max_bytes:
+        raise ValueError(
+            f"Audio file exceeds maximum allowed size ({max_bytes} bytes): {source_path.name}"
+        )
 
     raw = source_path.read_bytes()
     if not raw:
@@ -263,7 +273,7 @@ def transcribe_audio_file(
             f"Got {file_size} bytes for {source_path.name}."
         )
 
-    audio_meta = store_audio_file(source_path, project_audio_dir)
+    audio_meta = store_audio_file(source_path, project_audio_dir, max_bytes=max_audio_bytes)
     stored_audio = Path(audio_meta["stored_audio_path"])
 
     chosen_model = model

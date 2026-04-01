@@ -33,6 +33,14 @@ def test_store_audio_file_copies_with_hash_prefix(tmp_path):
     assert meta["duration_seconds"] is not None
 
 
+def test_store_audio_file_rejects_oversized_file(tmp_path):
+    src = tmp_path / "big.wav"
+    _make_wav(src)
+
+    with pytest.raises(ValueError, match="maximum allowed size"):
+        store_audio_file(src, tmp_path / "audio", max_bytes=1)
+
+
 def test_transcribe_audio_file_rejects_invalid_language(tmp_path, monkeypatch):
     src = tmp_path / "clip.wav"
     _make_wav(src)

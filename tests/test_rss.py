@@ -107,6 +107,65 @@ def test_fetch_feed_xml_rejects_non_xml_content_type(monkeypatch):
         assert "Unexpected Content-Type" in str(exc)
 
 
+def test_fetch_feed_xml_rejects_missing_content_type(monkeypatch):
+    """A response with no Content-Type must be rejected, not silently accepted."""
+    class _FakeResponse:
+        def __init__(self):
+            self.headers = Message()  # no Content-Type header set
+
+        def read(self, *args, **kwargs):
+            return b"<rss></rss>"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeOpener:
+        def open(self, req, timeout=20):
+            return _FakeResponse()
+
+    monkeypatch.setattr("polyphony.io.rss.is_safe_host", lambda hostname: True)
+    monkeypatch.setattr("polyphony.io.rss.urllib.request.build_opener", lambda *args: _FakeOpener())
+
+    try:
+        fetch_feed_xml("https://example.com/feed.xml")
+        assert False, "Expected ValueError"
+    except ValueError as exc:
+        assert "Unexpected Content-Type" in str(exc)
+
+
+def test_fetch_feed_xml_rejects_text_plain_content_type(monkeypatch):
+    """text/plain must not be accepted as a valid feed content-type."""
+    class _FakeResponse:
+        def __init__(self):
+            self.headers = Message()
+            self.headers.add_header("Content-Type", "text/plain")
+
+        def read(self, *args, **kwargs):
+            return b"<rss></rss>"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeOpener:
+        def open(self, req, timeout=20):
+            return _FakeResponse()
+
+    monkeypatch.setattr("polyphony.io.rss.is_safe_host", lambda hostname: True)
+    monkeypatch.setattr("polyphony.io.rss.urllib.request.build_opener", lambda *args: _FakeOpener())
+
+    try:
+        fetch_feed_xml("https://example.com/feed.xml")
+        assert False, "Expected ValueError"
+    except ValueError as exc:
+        assert "Unexpected Content-Type" in str(exc)
+
+
 def test_fetch_rss_entries_filters_by_keyword_and_recency(monkeypatch):
     feed_xml = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <rss version=\"2.0\">

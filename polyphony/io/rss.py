@@ -25,7 +25,7 @@ _MAX_FEED_BYTES = 10 * 1024 * 1024
 _CONTENT_NS = "http://purl.org/rss/1.0/modules/content/"
 _DC_NS = "http://purl.org/dc/elements/1.1/"
 _ATOM_NS = "http://www.w3.org/2005/Atom"
-_XML_ALLOWED_MIME_HINTS = ("xml", "rss", "atom", "text/plain")
+_XML_ALLOWED_MIME_HINTS = ("xml", "rss", "atom")
 
 
 def _normalize_space(text: Optional[str]) -> str:
@@ -316,9 +316,10 @@ def fetch_feed_xml(feed_url: str, timeout: int = 20, max_feed_bytes: int = _MAX_
     try:
         with opener.open(req, timeout=timeout) as response:
             content_type = (response.headers.get("Content-Type", "") or "").lower()
-            if content_type and not any(hint in content_type for hint in _XML_ALLOWED_MIME_HINTS):
+            if not any(hint in content_type for hint in _XML_ALLOWED_MIME_HINTS):
                 raise ValueError(
-                    f"Unexpected Content-Type for feed URL: {content_type}. Expected XML/RSS/Atom."
+                    f"Unexpected Content-Type for feed URL: {content_type!r}. "
+                    "Expected an XML/RSS/Atom content type."
                 )
 
             data = response.read(max_feed_bytes + 1)

@@ -508,170 +508,164 @@ def transcribe_cmd(
         console.print("[red]Failed to resolve active project.[/]")
         sys.exit(1)
 
-    audio_dir = project_dir / "audio"
-    transcripts_dir = project_dir / "transcripts"
-    transcripts_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        audio_dir = project_dir / "audio"
+        transcripts_dir = project_dir / "transcripts"
+        transcripts_dir.mkdir(parents=True, exist_ok=True)
 
-    max_audio_bytes = max_size_mb * 1024 * 1024
+        max_audio_bytes = max_size_mb * 1024 * 1024
 
-    imported_docs = 0
-    imported_segments = 0
-    skipped_files: list[str] = []
-    failed_files: list[tuple[Path, str]] = []
+        imported_docs = 0
+        imported_segments = 0
+        skipped_files: list[str] = []
+        failed_files: list[tuple[Path, str]] = []
 
-    console.print(f"[bold]Transcribing {len(files)} audio file(s) with {provider}...[/]")
+        console.print(f"[bold]Transcribing {len(files)} audio file(s) with {provider}...[/]")
 
-    for source_path in files:
-        try:
-            transcribed = transcribe_audio_file(
-                source_path,
-                project_audio_dir=audio_dir,
-                provider=provider,
-                model=model,
-                language=language,
-                prompt=prompt,
-                max_audio_bytes=max_audio_bytes,
+        for source_path in files:
+            try:
+                transcribed = transcribe_audio_file(
+                    source_path,
+                    project_audio_dir=audio_dir,
+                    provider=provider,
+                    model=model,
+                    language=language,
+                    prompt=prompt,
+                    max_audio_bytes=max_audio_bytes,
+                )
+            except Exception as exc:
+                failed_files.append((source_path, str(exc)))
+                console.print(f"  [red]x[/] {source_path.name}: {exc}")
+                continue
+
+            transcript_path = _next_transcript_path(transcripts_dir, source_path)
+            transcript_path.write_text(transcribed["text"], encoding="utf-8")
+
+            result = import_documents(
+                conn=conn,
+                project_id=project["id"],
+                paths=[transcript_path],
+                segment_strategy=segment_by,
+                min_segment_length=min_length,
+                metadata_override=transcribed["metadata"],
+                project_dir=project_dir,
             )
-        except Exception as exc:
-            failed_files.append((source_path, str(exc)))
-            console.print(f"  [red]x[/] {source_path.name}: {exc}")
-            continue
+            imported_docs += result["documents_imported"]
+            imported_segments += result["segments_created"]
+            skipped_files.extend(result["skipped"])
 
-        transcript_path = _next_transcript_path(transcripts_dir, source_path)
-        transcript_path.write_text(transcribed["text"], encoding="utf-8")
+            if result["documents_imported"] == 0:
+                console.print(
+                    f"  [yellow]-[/] {source_path.name}: transcript imported as duplicate or below thresholds"
+                )
+            else:
+                console.print(
+                    f"  [green]✓[/] {source_path.name} -> {transcript_path.name} "
+                    f"({result['segments_created']} segment(s))"
+                )
 
-        result = import_documents(
-            conn=conn,
-            project_id=project["id"],
-            paths=[transcript_path],
-            segment_strategy=segment_by,
-            min_segment_length=min_length,
-            metadata_override=transcribed["metadata"],
-            project_dir=project_dir,
+        if imported_docs == 0:
+            console.print("[red]No transcripts were imported.[/]")
+            for source_path, error in failed_files:
+                console.print(f"  [red]-[/] {source_path}: {error}")
+            sys.exit(1)
+
+        console.print(
+            f"\n[green]Transcription import complete:[/] "
+            f"{imported_docs} document(s), {imported_segments} segment(s)."
         )
-        imported_docs += result["documents_imported"]
-        imported_segments += result["segments_created"]
-        skipped_files.extend(result["skipped"])
+        if skipped_files:
+            console.print(f"[yellow]Skipped {len(skipped_files)} import(s).[/]")
+        if failed_files:
+            console.print(f"[yellow]{len(failed_files)} audio file(s) failed transcription.[/]")
 
-        if result["documents_imported"] == 0:
-            console.print(
-                f"  [yellow]-[/] {source_path.name}: transcript imported as duplicate or below thresholds"
-            )
-        else:
-            console.print(
-                f"  [green]✓[/] {source_path.name} -> {transcript_path.name} "
-                f"({result['segments_created']} segment(s))"
-            )
+        from ..pipeline.coding import run_coding_session
+        from ..pipeline.induction import run_induction
 
-    if imported_docs == 0:
+        agent_a = agent_b = supervisor = None
+        if auto_induce or auto_code:
+            agent_a, agent_b, supervisor = build_agent_objects(conn, project["id"])
+
+        active_cb = get_active_codebook(conn, project["id"])
+        if auto_induce:
+            if agent_a is None:
+                console.print("[red]Coder A is not configured. Cannot run --auto-induce.[/]")
+                sys.exit(1)
+
+            if not skip_agent_b_induction and agent_b is None:
+                console.print("[red]Coder B is not configured. Use --skip-agent-b-induction or reconfigure agents.[/]")
+                sys.exit(1)
+
+            for label, agent_obj in [("A", agent_a), ("B", agent_b)]:
+                if agent_obj is None:
+                    continue
+                if label == "B" and skip_agent_b_induction:
+                    continue
+                if hasattr(agent_obj, "is_available") and not agent_obj.is_available():
+                    console.print(
+                        f"[red]Model '{agent_obj.model_name}' (Coder {label}) is unavailable.[/]"
+                    )
+                    sys.exit(1)
+
+            cb_id = run_induction(
+                conn=conn,
+                project=project,
+                agent_a=agent_a,
+                agent_b=agent_b,
+                sample_size=induction_sample_size,
+                sample_seed=induction_seed,
+                skip_agent_b=skip_agent_b_induction,
+                human_leads=False,
+                supervisor_agent=supervisor,
+                auto_accept_all=auto_approve_codes,
+            )
+            active_cb = fetchone(conn, "SELECT * FROM codebook_version WHERE id = ?", (cb_id,))
+
+        if auto_code:
+            if agent_a is None or agent_b is None:
+                console.print("[red]Both Coder A and Coder B are required for --auto-code.[/]")
+                sys.exit(1)
+
+            if active_cb is None:
+                console.print(
+                    "[red]No active codebook. Run --auto-induce first or use `polyphony codebook induce`.[/]"
+                )
+                sys.exit(1)
+
+            for label, agent_obj in [("A", agent_a), ("B", agent_b)]:
+                if hasattr(agent_obj, "is_available") and not agent_obj.is_available():
+                    console.print(
+                        f"[red]Model '{agent_obj.model_name}' (Coder {label}) is unavailable.[/]"
+                    )
+                    sys.exit(1)
+
+            console.print("\n[bold]Running independent coding for Coder A and Coder B...[/]")
+            run_coding_session(
+                conn=conn,
+                project=project,
+                agent=agent_a,
+                codebook_version_id=active_cb["id"],
+                run_type="independent",
+                resume=False,
+                prompt_key="open_coding",
+            )
+            run_coding_session(
+                conn=conn,
+                project=project,
+                agent=agent_b,
+                codebook_version_id=active_cb["id"],
+                run_type="independent",
+                resume=False,
+                prompt_key="open_coding",
+            )
+            conn.execute(
+                "UPDATE project SET status='irr', updated_at=datetime('now') WHERE id=?",
+                (project["id"],),
+            )
+            conn.commit()
+            console.print("[green]Auto-coding complete.[/]")
+    finally:
         conn.close()
-        console.print("[red]No transcripts were imported.[/]")
-        for source_path, error in failed_files:
-            console.print(f"  [red]-[/] {source_path}: {error}")
-        sys.exit(1)
-
-    console.print(
-        f"\n[green]Transcription import complete:[/] "
-        f"{imported_docs} document(s), {imported_segments} segment(s)."
-    )
-    if skipped_files:
-        console.print(f"[yellow]Skipped {len(skipped_files)} import(s).[/]")
-    if failed_files:
-        console.print(f"[yellow]{len(failed_files)} audio file(s) failed transcription.[/]")
-
-    from ..pipeline.coding import run_coding_session
-    from ..pipeline.induction import run_induction
-
-    agent_a = agent_b = supervisor = None
-    if auto_induce or auto_code:
-        agent_a, agent_b, supervisor = build_agent_objects(conn, project["id"])
-
-    active_cb = get_active_codebook(conn, project["id"])
-    if auto_induce:
-        if agent_a is None:
-            conn.close()
-            console.print("[red]Coder A is not configured. Cannot run --auto-induce.[/]")
-            sys.exit(1)
-
-        if not skip_agent_b_induction and agent_b is None:
-            conn.close()
-            console.print("[red]Coder B is not configured. Use --skip-agent-b-induction or reconfigure agents.[/]")
-            sys.exit(1)
-
-        for label, agent_obj in [("A", agent_a), ("B", agent_b)]:
-            if agent_obj is None:
-                continue
-            if label == "B" and skip_agent_b_induction:
-                continue
-            if hasattr(agent_obj, "is_available") and not agent_obj.is_available():
-                conn.close()
-                console.print(
-                    f"[red]Model '{agent_obj.model_name}' (Coder {label}) is unavailable.[/]"
-                )
-                sys.exit(1)
-
-        cb_id = run_induction(
-            conn=conn,
-            project=project,
-            agent_a=agent_a,
-            agent_b=agent_b,
-            sample_size=induction_sample_size,
-            sample_seed=induction_seed,
-            skip_agent_b=skip_agent_b_induction,
-            human_leads=False,
-            supervisor_agent=supervisor,
-            auto_accept_all=auto_approve_codes,
-        )
-        active_cb = fetchone(conn, "SELECT * FROM codebook_version WHERE id = ?", (cb_id,))
-
-    if auto_code:
-        if agent_a is None or agent_b is None:
-            conn.close()
-            console.print("[red]Both Coder A and Coder B are required for --auto-code.[/]")
-            sys.exit(1)
-
-        if active_cb is None:
-            conn.close()
-            console.print(
-                "[red]No active codebook. Run --auto-induce first or use `polyphony codebook induce`.[/]"
-            )
-            sys.exit(1)
-
-        for label, agent_obj in [("A", agent_a), ("B", agent_b)]:
-            if hasattr(agent_obj, "is_available") and not agent_obj.is_available():
-                conn.close()
-                console.print(
-                    f"[red]Model '{agent_obj.model_name}' (Coder {label}) is unavailable.[/]"
-                )
-                sys.exit(1)
-
-        console.print("\n[bold]Running independent coding for Coder A and Coder B...[/]")
-        run_coding_session(
-            conn=conn,
-            project=project,
-            agent=agent_a,
-            codebook_version_id=active_cb["id"],
-            run_type="independent",
-            resume=False,
-            prompt_key="open_coding",
-        )
-        run_coding_session(
-            conn=conn,
-            project=project,
-            agent=agent_b,
-            codebook_version_id=active_cb["id"],
-            run_type="independent",
-            resume=False,
-            prompt_key="open_coding",
-        )
-        conn.execute(
-            "UPDATE project SET status='irr', updated_at=datetime('now') WHERE id=?",
-            (project["id"],),
-        )
-        conn.commit()
-        console.print("[green]Auto-coding complete.[/]")
-
-    conn.close()
 
     console.print("\n[bold]Suggested next steps[/]")
     if not auto_induce:

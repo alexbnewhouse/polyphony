@@ -47,17 +47,7 @@ def _is_safe_host(hostname: str) -> bool:
 
 
 class SafeRedirectHandler(_BaseSafeRedirectHandler):
-    """Compatibility wrapper that consults fetchers._is_safe_host for tests."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        parsed = urlparse(newurl)
-        if parsed.scheme not in ("http", "https"):
-            raise urllib.error.URLError(f"Redirected to unsupported scheme: {newurl}")
-        if not _is_safe_host(parsed.hostname or ""):
-            raise urllib.error.URLError(f"Redirected to unsafe host: {newurl}")
-        return urllib.request.HTTPRedirectHandler.redirect_request(
-            self, req, fp, code, msg, headers, newurl,
-        )
+    """Thin alias of net_safety.SafeRedirectHandler for use in this module."""
 
 def _download_one(
     url: str,
