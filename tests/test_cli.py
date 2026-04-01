@@ -156,3 +156,94 @@ def test_practice_topic_mode_uses_llm_generator(monkeypatch, tmp_path):
             conn.close()
 
         assert n_docs == 2
+
+
+def test_practice_default_mode_does_not_call_llm_generator(monkeypatch, tmp_path):
+    """Negative control: default practice path must stay offline/template-based."""
+    projects_root = tmp_path / "projects"
+    env = {"POLYPHONY_PROJECTS_DIR": str(projects_root)}
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("LLM generator should not be called in default practice mode")
+
+    monkeypatch.setattr("polyphony.cli.cmd_practice.generate_llm_data", fail_if_called)
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "practice",
+                "--domain",
+                "housing",
+                "--segments",
+                "3",
+                "--overwrite",
+            ],
+            env=env,
+        )
+
+        assert result.exit_code == 0, result.output
+
+
+def test_practice_source_file_mode_skips_generators_and_respects_no_open(monkeypatch, tmp_path):
+    """Practice with real data should not invoke synthetic generators."""
+    projects_root = tmp_path / "projects"
+    env = {"POLYPHONY_PROJECTS_DIR": str(projects_root)}
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("Synthetic generator should not be called in --source-file mode")
+
+    monkeypatch.setattr("polyphony.cli.cmd_practice.generate_template_data", fail_if_called)
+    monkeypatch.setattr("polyphony.cli.cmd_practice.generate_llm_data", fail_if_called)
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        source = Path("real_data.txt")
+        source.write_text(
+            "This is a sufficiently long training transcript excerpt for testing the import path.",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli,
+            [
+                "practice",
+                "--source-file",
+                str(source),
+                "--no-open",
+                "--overwrite",
+            ],
+            env=env,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert not Path(".polyphony_project").exists()
+
+
+def test_practice_rejects_topic_with_source_file(tmp_path):
+    projects_root = tmp_path / "projects"
+    env = {"POLYPHONY_PROJECTS_DIR": str(projects_root)}
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        source = Path("input.txt")
+        source.write_text(
+            "This file exists so the option parser accepts --source-file.",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli,
+            [
+                "practice",
+                "--source-file",
+                str(source),
+                "--topic",
+                "burnout",
+            ],
+            env=env,
+        )
+
+        assert result.exit_code != 0
+        assert "Choose either --source-file or --topic" in result.output

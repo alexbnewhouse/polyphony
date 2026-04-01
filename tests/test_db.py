@@ -1,5 +1,7 @@
 """Tests for the database layer."""
 
+from pathlib import Path
+
 import pytest
 from polyphony.db import (
     connect,
@@ -38,8 +40,10 @@ def test_migrations_run_once(db_path):
         conn = connect(db_path)
         versions = fetchall(conn, "SELECT * FROM schema_migration")
         conn.close()
-    # Should have exactly 4 migrations applied (001–004)
-    assert len(versions) == 4
+    # Should match the number of SQL migration files on disk.
+    migrations_dir = Path(__file__).resolve().parents[1] / "polyphony" / "db" / "migrations"
+    expected_count = len(list(migrations_dir.glob("*.sql")))
+    assert len(versions) == expected_count
 
 
 def test_insert_and_fetchone(conn):
@@ -138,5 +142,34 @@ def test_find_project_db_accepts_marker_within_projects_root(tmp_path, monkeypat
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / ".polyphony_project").write_text(str(project_dir), encoding="utf-8")
+
+    assert find_project_db(workspace) == db_path
+
+
+def test_find_project_db_rejects_empty_marker(tmp_path, monkeypatch):
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    monkeypatch.setenv("POLYPHONY_PROJECTS_DIR", str(projects_root))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".polyphony_project").write_text("", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match=r"empty \.polyphony_project marker"):
+        find_project_db(workspace)
+
+
+def test_find_project_db_supports_relative_marker_path(tmp_path, monkeypatch):
+    projects_root = tmp_path / "projects"
+    project_dir = projects_root / "demo-project"
+    project_dir.mkdir(parents=True)
+    db_path = project_dir / "project.db"
+    db_path.touch()
+    monkeypatch.setenv("POLYPHONY_PROJECTS_DIR", str(projects_root))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    # Relative marker path should resolve from the marker directory.
+    (workspace / ".polyphony_project").write_text("../projects/demo-project", encoding="utf-8")
 
     assert find_project_db(workspace) == db_path

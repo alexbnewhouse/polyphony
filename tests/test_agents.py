@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import hashlib
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from polyphony.agents.base import parse_json
-from polyphony.db import connect, insert
+from polyphony.agents.base import BaseAgent, parse_json
+from polyphony.db import connect, fetchone, insert
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -299,3 +300,100 @@ class TestBuildAgentObjects:
 
             agent_a, agent_b, supervisor = build_agent_objects(conn, project_id)
             assert isinstance(agent_b, AnthropicAgent)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# BaseAgent call/logging behavior
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class _DummySuccessAgent(BaseAgent):
+    def _call_llm(self, system_prompt, user_prompt, images=None):
+        return "{\"ok\": true}", {"ok": True}
+
+
+class _DummyFailAgent(BaseAgent):
+    def _call_llm(self, system_prompt, user_prompt, images=None):
+        raise RuntimeError("synthetic failure")
+
+
+def _get_coder_a_id(conn, project_id):
+    row = fetchone(
+        conn,
+        "SELECT id FROM agent WHERE project_id = ? AND role = 'coder_a'",
+        (project_id,),
+    )
+    assert row is not None
+    return row["id"]
+
+
+def test_base_agent_call_logs_success_with_images(conn, project_id):
+    agent = _DummySuccessAgent(
+        agent_id=_get_coder_a_id(conn, project_id),
+        project_id=project_id,
+        role="coder_a",
+        model_name="dummy",
+        model_version="test",
+        temperature=0.1,
+        seed=42,
+        conn=conn,
+    )
+
+    raw, parsed, call_id = agent.call(
+        "coding",
+        "SYSTEM",
+        "USER",
+        images=["/tmp/image1.png"],
+    )
+
+    assert raw == '{"ok": true}'
+    assert parsed == {"ok": True}
+
+    logged = fetchone(conn, "SELECT * FROM llm_call WHERE id = ?", (call_id,))
+    assert logged is not None
+    assert logged["error"] is None
+    assert logged["parsed_output"] is not None
+    assert "[Images: /tmp/image1.png]" in logged["user_prompt"]
+
+    expected_hash = hashlib.sha256(
+        ("SYSTEM\n---\nUSER\n\n[Images: /tmp/image1.png]").encode("utf-8")
+    ).hexdigest()
+    assert logged["prompt_hash"] == expected_hash
+
+
+def test_base_agent_call_logs_errors_and_reraises(conn, project_id):
+    agent = _DummyFailAgent(
+        agent_id=_get_coder_a_id(conn, project_id),
+        project_id=project_id,
+        role="coder_a",
+        model_name="dummy",
+        model_version="test",
+        temperature=0.1,
+        seed=42,
+        conn=conn,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        agent.call("coding", "SYSTEM", "USER")
+
+    logged = fetchone(conn, "SELECT * FROM llm_call ORDER BY id DESC LIMIT 1")
+    assert logged is not None
+    assert "synthetic failure" in (logged["error"] or "")
+    assert logged["parsed_output"] is None
+
+
+def test_update_call_link_rejects_invalid_columns(conn, project_id):
+    agent = _DummySuccessAgent(
+        agent_id=_get_coder_a_id(conn, project_id),
+        project_id=project_id,
+        role="coder_a",
+        model_name="dummy",
+        model_version="test",
+        temperature=0.1,
+        seed=42,
+        conn=conn,
+    )
+
+    _, _, call_id = agent.call("coding", "SYSTEM", "USER")
+    with pytest.raises(ValueError, match="Invalid link column"):
+        agent.update_call_link(call_id, not_a_real_fk=123)

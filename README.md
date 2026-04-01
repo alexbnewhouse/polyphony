@@ -423,6 +423,35 @@ The `polyphony export replication` command packages all of this into a self-cont
 
 ---
 
+## Quality and Testing
+
+polyphony's test suite is designed to avoid confirmation bias by combining:
+
+- Unit tests for deterministic helpers (segmentation, parsing, DB helpers)
+- Integration tests for end-to-end workflows (imports, coding, IRR, export)
+- Adversarial tests that assert failure paths and guardrails (for example: unsafe redirects, invalid marker paths, non-overlapping IRR inputs, incompatible CLI options)
+- Scenario-based orchestration tests for calibration and coding session control flow (resume behavior, superseding incomplete runs, threshold-driven calibration exits, and 3-way calibration paths)
+
+Run the full suite:
+
+```bash
+pytest -q
+```
+
+Run targeted orchestration tests:
+
+```bash
+pytest tests/test_coding_pipeline.py tests/test_calibration_pipeline.py -q
+```
+
+Run with coverage and missing-lines report:
+
+```bash
+pytest --cov=polyphony --cov-report=term-missing:skip-covered -q
+```
+
+---
+
 ## Customising Prompts
 
 All prompts are in the `polyphony/prompt_templates/` directory as editable YAML files:

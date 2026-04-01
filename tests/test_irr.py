@@ -98,6 +98,20 @@ def test_krippendorff_alpha_empty():
     assert math.isnan(alpha)
 
 
+def test_kappa_is_nan_when_no_overlapping_segments():
+    codes_a = {1: {"A"}, 2: {"B"}}
+    codes_b = {3: {"A"}, 4: {"B"}}
+    kappa = compute_cohen_kappa(codes_a, codes_b, ["A", "B"])
+    assert math.isnan(kappa)
+
+
+def test_alpha_is_nan_when_no_overlapping_segments():
+    codes_a = {1: {"A"}}
+    codes_b = {2: {"A"}}
+    alpha = compute_krippendorff_alpha(codes_a, codes_b, all_codes=["A"])
+    assert math.isnan(alpha)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 3-way unit tests
 # ─────────────────────────────────────────────────────────────────────────────
@@ -136,6 +150,17 @@ def test_percent_agreement_multiway_partial():
     pct, agree, total = compute_percent_agreement_multiway(codes_a, codes_b, codes_c)
     assert total == 3
     assert agree == 2
+
+
+def test_percent_agreement_multiway_uses_intersection_only():
+    codes_a = {1: {"A"}, 2: {"B"}, 4: {"X"}}
+    codes_b = {1: {"A"}, 2: {"B"}, 5: {"Y"}}
+    codes_c = {1: {"A"}, 2: {"Z"}, 6: {"W"}}
+    pct, agree, total = compute_percent_agreement_multiway(codes_a, codes_b, codes_c)
+    # Intersection is segments {1, 2}; agreement only on segment 1.
+    assert total == 2
+    assert agree == 1
+    assert abs(pct - 0.5) < 0.001
 
 
 def test_find_disagreements_multiway():

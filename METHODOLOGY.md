@@ -40,6 +40,11 @@ Methodologically, this separates workflow training from substantive analysis. It
 research teams standardize coding procedure, memo conventions, and disagreement review
 before they touch the real corpus.
 
+From a software-validity perspective, the implementation is backed by scenario-based
+integration tests covering calibration and coding orchestration (for example,
+resume behavior, superseding incomplete runs, and threshold-driven calibration exits)
+plus adversarial negative controls for key safety constraints.
+
 ---
 
 ## Why Two AI Coders?

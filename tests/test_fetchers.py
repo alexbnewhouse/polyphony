@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import http.server
 import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from unittest.mock import patch
@@ -14,6 +16,7 @@ import pytest
 from polyphony.io.fetchers import (
     _is_safe_host,
     _sanitize_filename,
+    SafeRedirectHandler,
     fetch_images_from_csv,
 )
 from polyphony.io.importers import sha256_bytes
@@ -117,6 +120,20 @@ class TestIsSafeHost:
     def test_blocks_empty(self):
         assert _is_safe_host("") is False
 
+    def test_blocks_hostname_resolving_to_private_ip(self, monkeypatch):
+        monkeypatch.setattr(
+            "socket.getaddrinfo",
+            lambda host, port: [(None, None, None, None, ("10.0.0.9", 0))],
+        )
+        assert _is_safe_host("example.internal") is False
+
+    def test_allows_hostname_resolving_to_public_ip(self, monkeypatch):
+        monkeypatch.setattr(
+            "socket.getaddrinfo",
+            lambda host, port: [(None, None, None, None, ("93.184.216.34", 0))],
+        )
+        assert _is_safe_host("example.com") is True
+
 
 class TestSanitizeFilename:
     def test_simple_url(self):
@@ -139,6 +156,37 @@ class TestSha256Bytes:
 
     def test_different_data(self):
         assert sha256_bytes(b"a") != sha256_bytes(b"b")
+
+
+class TestSafeRedirectHandler:
+    def test_rejects_non_http_redirect(self):
+        handler = SafeRedirectHandler()
+        req = urllib.request.Request("https://example.com/start.png")
+
+        with pytest.raises(urllib.error.URLError, match="unsupported scheme"):
+            handler.redirect_request(
+                req,
+                fp=None,
+                code=302,
+                msg="Found",
+                headers={},
+                newurl="file:///etc/passwd",
+            )
+
+    def test_rejects_unsafe_host_redirect(self, monkeypatch):
+        monkeypatch.setattr("polyphony.io.fetchers._is_safe_host", lambda hostname: False)
+        handler = SafeRedirectHandler()
+        req = urllib.request.Request("https://example.com/start.png")
+
+        with pytest.raises(urllib.error.URLError, match="unsafe host"):
+            handler.redirect_request(
+                req,
+                fp=None,
+                code=302,
+                msg="Found",
+                headers={},
+                newurl="https://metadata.google.internal/instance",
+            )
 
 
 # ---------------------------------------------------------------------------
