@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from polyphony.db import insert, json_col
 from polyphony.io.exporters import (
     export_assignments,
     export_codebook,
@@ -104,3 +105,57 @@ def test_replication_irr_script_uses_intersection(conn, project_id, codebook_ver
     script = (out_dir / "scripts" / "compute_irr.py").read_text(encoding="utf-8")
     assert "set(a).intersection(set(b))" in script
     assert "set(a) | set(b)" not in script
+
+
+def test_replication_package_includes_audio_sources_and_manifest_count(conn, project_id, tmp_path):
+    from polyphony.io.importers import sha256
+
+    audio_src = tmp_path / "raw_interview.wav"
+    audio_src.write_bytes(b"RIFFstub")
+
+    content = "Transcript text from an audio interview that is long enough for one segment."
+    doc_id = insert(
+        conn,
+        "document",
+        {
+            "project_id": project_id,
+            "filename": "interview_01.txt",
+            "source_path": str(tmp_path / "interview_01.txt"),
+            "content": content,
+            "content_hash": sha256(content),
+            "char_count": len(content),
+            "word_count": len(content.split()),
+            "status": "segmented",
+            "metadata": json_col(
+                {
+                    "source_type": "audio_transcription",
+                    "source_audio_path": str(audio_src),
+                    "transcription_provider": "local_whisper",
+                }
+            ),
+        },
+    )
+    insert(
+        conn,
+        "segment",
+        {
+            "document_id": doc_id,
+            "project_id": project_id,
+            "segment_index": 0,
+            "text": content,
+            "char_start": 0,
+            "char_end": len(content),
+            "segment_hash": sha256(content),
+            "is_calibration": 0,
+        },
+    )
+    conn.commit()
+
+    out_dir = tmp_path / "replication"
+    export_replication_package(conn, project_id, out_dir)
+
+    copied_audio = out_dir / "audio" / audio_src.name
+    assert copied_audio.exists()
+
+    manifest = json.loads((out_dir / "MANIFEST.json").read_text(encoding="utf-8"))
+    assert manifest["corpus_stats"]["audio_transcript_count"] == 1

@@ -28,6 +28,7 @@ All model calls are logged with full prompts, responses, model versions, tempera
 - **Flag & discussion system**: Ambiguous cases surface for structured debate
 - **Analytical memos**: Write theoretical/methodological notes throughout
 - **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
+- **Audio transcription ingest**: Upload audio interviews and auto-transcribe to text with local Whisper (`faster-whisper`) or OpenAI transcription APIs
 - **Multiple model providers**: Ollama (local), OpenAI, Anthropic — mix and match across coders
 - **Full replication package**: Every prompt, response, decision, and prompt hash is exportable
 - **Supports multiple methodologies**: Grounded theory, thematic analysis, content analysis
@@ -100,7 +101,18 @@ polyphony data import photos/*.jpg
 
 # Image URLs from CSV
 polyphony data fetch-images image_urls.csv --url-column url
+
+# Audio interviews (transcribe first, then import transcript segments)
+polyphony data transcribe interviews/*.wav
+polyphony data transcribe interview.mp3 --provider openai --model whisper-1
+
+# Optional jumpstart after transcription
+polyphony data transcribe focus_group.m4a --auto-induce --auto-code
 ```
+
+`data transcribe` stores source audio files under the project `audio/` directory,
+writes transcript text files under `transcripts/`, and imports transcript segments as
+standard text documents with provenance metadata.
 
 ### 4. Build or import a codebook
 
@@ -284,6 +296,7 @@ polyphony practice             Create an offline-first practice sandbox
 
 polyphony data import          Import documents (txt, csv, json, docx)
 polyphony data fetch-images    Fetch image URLs from CSV and import
+polyphony data transcribe      Transcribe audio files and import transcript text
 polyphony data list            List imported documents
 polyphony data show            Display a document or its segments
 
@@ -368,6 +381,7 @@ click, rich, pydantic, ollama, krippendorff, scikit-learn, numpy, pandas, PyYAML
 
 ```bash
 pip install polyphony[images]          # Pillow for image metadata
+pip install polyphony[audio]           # faster-whisper local transcription
 pip install polyphony[openai]          # OpenAI API support
 pip install polyphony[anthropic]       # Anthropic API support
 pip install polyphony[all-providers]   # All cloud providers

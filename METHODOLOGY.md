@@ -47,6 +47,37 @@ plus adversarial negative controls for key safety constraints.
 
 ---
 
+## Audio Transcription as a Pre-Ingest Layer
+
+polyphony now supports direct audio ingestion through `polyphony data transcribe`.
+Methodologically, this is treated as a **pre-ingest transformation step**:
+
+1. Source audio is copied into the project for provenance.
+2. A transcription backend (local Whisper or OpenAI transcription) produces text.
+3. Transcript text is segmented and coded through the same text-native pipeline.
+
+This design intentionally avoids a separate "audio coding" prompt branch in early
+phases. It keeps coding semantics stable and reuses the validated text workflow
+for induction, calibration, coding, IRR, discussion, and export.
+
+### Validity implications
+
+- **Transcription quality affects downstream coding quality.** Mis-transcribed speech,
+  speaker overlap, and domain-specific jargon can propagate into coding decisions.
+- **Language hints should be explicit** when known (`--language`) to reduce
+  transcription drift.
+- **Research teams should spot-check transcript fidelity** (for example, random
+  manual audits against the source audio) before interpreting low-frequency codes.
+
+### Reproducibility implications
+
+Transcribed documents carry provenance metadata (provider, model, source audio path,
+hash, and language hints). Replication exports include these metadata plus copied
+source audio artifacts when available, so reviewers can audit transformation from
+audio to coded text.
+
+---
+
 ## Why Two AI Coders?
 
 Using two models (with different seeds) rather than one serves the same purpose

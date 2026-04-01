@@ -1,1 +1,1 @@
-"""polyphony I/O: importers and exporters."""
+"""polyphony I/O: importers, exporters, fetchers, and transcribers."""

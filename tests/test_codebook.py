@@ -9,6 +9,7 @@ import yaml
 
 from polyphony.db import fetchall, fetchone
 from polyphony.pipeline.induction import (
+    human_review_candidates,
     merge_candidates,
     save_codebook_version,
     select_induction_sample,
@@ -89,6 +90,15 @@ def test_save_codebook_version(conn, project_id):
     saved_codes = fetchall(conn, "SELECT * FROM code WHERE codebook_version_id = ?", (cb_id,))
     assert len(saved_codes) == 1
     assert saved_codes[0]["name"] == "CODE_A"
+
+
+def test_human_review_candidates_auto_accept():
+    candidates = [
+        {"name": "CODE_A", "description": "A", "level": "open"},
+        {"name": "CODE_B", "description": "B", "level": "open"},
+    ]
+    approved = human_review_candidates(candidates, auto_accept_all=True)
+    assert approved == candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
