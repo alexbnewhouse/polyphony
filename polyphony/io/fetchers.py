@@ -10,9 +10,7 @@ them locally for subsequent import into a polyphony project.
 from __future__ import annotations
 
 import csv
-import ipaddress
 import re
-import socket
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -23,6 +21,7 @@ from urllib.parse import urlparse
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, MofNCompleteColumn
 
 from .importers import sha256_bytes
+from .net_safety import SafeRedirectHandler as _BaseSafeRedirectHandler, is_safe_host
 
 # Maximum download size per image (50 MB)
 _MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
@@ -38,42 +37,27 @@ def _sanitize_filename(url: str) -> str:
     name = name.split("?")[0]
     # Remove any remaining path separators to prevent traversal
     name = re.sub(r'[/\\]', '_', name)
-    return name
+    # Keep enough room for hash prefixes and common filesystem limits.
+    return name[:240]
 
 
 def _is_safe_host(hostname: str) -> bool:
-    """Reject URLs pointing to localhost, private IPs, or cloud metadata endpoints."""
-    if not hostname:
-        return False
-    # Block obvious localhost
-    if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        return False
-    # Block cloud metadata endpoints
-    if hostname in ("169.254.169.254", "metadata.google.internal"):
-        return False
-    try:
-        addr = ipaddress.ip_address(hostname)
-        return not (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved)
-    except ValueError:
-        # It's a hostname, not an IP — resolve and check
-        try:
-            for info in socket.getaddrinfo(hostname, None):
-                addr = ipaddress.ip_address(info[4][0])
-                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-                    return False
-        except socket.gaierror:
-            return False
-    return True
+    """Compatibility wrapper for legacy tests and call sites."""
+    return is_safe_host(hostname)
 
 
-class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+class SafeRedirectHandler(_BaseSafeRedirectHandler):
+    """Compatibility wrapper that consults fetchers._is_safe_host for tests."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         parsed = urlparse(newurl)
         if parsed.scheme not in ("http", "https"):
             raise urllib.error.URLError(f"Redirected to unsupported scheme: {newurl}")
         if not _is_safe_host(parsed.hostname or ""):
             raise urllib.error.URLError(f"Redirected to unsafe host: {newurl}")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        return urllib.request.HTTPRedirectHandler.redirect_request(
+            self, req, fp, code, msg, headers, newurl,
+        )
 
 def _download_one(
     url: str,

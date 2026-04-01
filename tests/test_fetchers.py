@@ -148,6 +148,11 @@ class TestSanitizeFilename:
     def test_empty_path(self):
         assert _sanitize_filename("https://example.com") == "image"
 
+    def test_filename_is_length_bounded(self):
+        long_name = "a" * 500 + ".png"
+        sanitized = _sanitize_filename(f"https://example.com/{long_name}")
+        assert len(sanitized) <= 240
+
 
 class TestSha256Bytes:
     def test_deterministic(self):

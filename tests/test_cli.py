@@ -518,3 +518,285 @@ def test_data_transcribe_auto_induce_and_auto_code_orchestration(monkeypatch, tm
     assert calls["induction"] is not None
     assert calls["induction"]["auto_accept_all"] is True
     assert calls["coding"] == 2
+
+
+def test_data_rss_preview_displays_entries(monkeypatch):
+    monkeypatch.setattr(
+        "polyphony.cli.cmd_data.fetch_rss_entries",
+        lambda *args, **kwargs: {
+            "feed_title": "Test Feed",
+            "feed_url": "https://example.com/feed.xml",
+            "total_entries": 2,
+            "entries": [
+                {
+                    "index": 1,
+                    "title": "Entry One",
+                    "published_at": "2026-04-01T00:00:00+00:00",
+                    "text": "Some transcript-like text",
+                    "content_source": "summary",
+                },
+                {
+                    "index": 2,
+                    "title": "Entry Two",
+                    "published_at": "2026-04-01T01:00:00+00:00",
+                    "text": "Another transcript-like text",
+                    "content_source": "content",
+                },
+            ],
+        },
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["data", "rss", "preview", "https://example.com/feed.xml"])
+
+    assert result.exit_code == 0, result.output
+    assert "Test Feed" in result.output
+    assert "Entry One" in result.output
+    assert "Entry Two" in result.output
+
+
+def test_data_rss_import_select_subset(monkeypatch, tmp_path):
+    projects_root = tmp_path / "projects"
+    slug = "rss-test"
+    db_path = projects_root / slug / "project.db"
+    _seed_cli_project(db_path, slug=slug)
+    env = {"POLYPHONY_PROJECTS_DIR": str(projects_root)}
+
+    monkeypatch.setattr(
+        "polyphony.cli.cmd_data.fetch_rss_entries",
+        lambda *args, **kwargs: {
+            "feed_title": "Test Feed",
+            "feed_url": "https://example.com/feed.xml",
+            "total_entries": 3,
+            "entries": [
+                {
+                    "index": 1,
+                    "title": "Entry One",
+                    "guid": "g1",
+                    "link": "https://example.com/1",
+                    "author": "Desk",
+                    "published_at": "2026-04-01T00:00:00+00:00",
+                    "published_raw": "Tue, 01 Apr 2026 00:00:00 GMT",
+                    "tags": ["a"],
+                    "content_source": "summary",
+                    "text": "This is a long first entry suitable for import.",
+                },
+                {
+                    "index": 2,
+                    "title": "Entry Two",
+                    "guid": "g2",
+                    "link": "https://example.com/2",
+                    "author": "Desk",
+                    "published_at": "2026-04-01T00:00:00+00:00",
+                    "published_raw": "Tue, 01 Apr 2026 00:00:00 GMT",
+                    "tags": ["b"],
+                    "content_source": "summary",
+                    "text": "This is a long second entry suitable for import.",
+                },
+                {
+                    "index": 3,
+                    "title": "Entry Three",
+                    "guid": "g3",
+                    "link": "https://example.com/3",
+                    "author": "Desk",
+                    "published_at": "2026-04-01T00:00:00+00:00",
+                    "published_raw": "Tue, 01 Apr 2026 00:00:00 GMT",
+                    "tags": ["c"],
+                    "content_source": "summary",
+                    "text": "This is a long third entry suitable for import.",
+                },
+            ],
+        },
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "--project",
+            slug,
+            "data",
+            "rss",
+            "import",
+            "https://example.com/feed.xml",
+            "--select",
+            "1,3",
+            "--segment-by",
+            "manual",
+            "--min-length",
+            "5",
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0, result.output
+
+    conn = connect(db_path)
+    try:
+        project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+        assert project is not None
+
+        docs_count = fetchone(
+            conn,
+            "SELECT COUNT(*) AS n FROM document WHERE project_id = ?",
+            (project["id"],),
+        )
+        assert docs_count is not None
+        assert docs_count["n"] == 2
+
+        doc = fetchone(
+            conn,
+            "SELECT * FROM document WHERE project_id = ? ORDER BY id LIMIT 1",
+            (project["id"],),
+        )
+        assert doc is not None
+        metadata = json.loads(doc["metadata"])
+        assert metadata["source_type"] == "rss_feed"
+        assert metadata["feed_url"] == "https://example.com/feed.xml"
+    finally:
+        conn.close()
+
+
+def test_data_rss_import_rejects_out_of_range_selection(monkeypatch, tmp_path):
+    projects_root = tmp_path / "projects"
+    slug = "rss-test"
+    db_path = projects_root / slug / "project.db"
+    _seed_cli_project(db_path, slug=slug)
+    env = {"POLYPHONY_PROJECTS_DIR": str(projects_root)}
+
+    monkeypatch.setattr(
+        "polyphony.cli.cmd_data.fetch_rss_entries",
+        lambda *args, **kwargs: {
+            "feed_title": "Test Feed",
+            "feed_url": "https://example.com/feed.xml",
+            "total_entries": 1,
+            "entries": [
+                {
+                    "index": 1,
+                    "title": "Entry One",
+                    "text": "Long enough entry text for import.",
+                }
+            ],
+        },
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "--project",
+            slug,
+            "data",
+            "rss",
+            "import",
+            "https://example.com/feed.xml",
+            "--select",
+            "2",
+        ],
+        env=env,
+    )
+
+    assert result.exit_code != 0
+    assert "exceeds available entries" in result.output
+
+
+def test_data_rss_preview_reports_undated_filtering(monkeypatch):
+    monkeypatch.setattr(
+        "polyphony.cli.cmd_data.fetch_rss_entries",
+        lambda *args, **kwargs: {
+            "feed_title": "Test Feed",
+            "feed_url": "https://example.com/feed.xml",
+            "total_entries": 3,
+            "undated_filtered_count": 2,
+            "entries": [
+                {
+                    "index": 1,
+                    "title": "Dated Entry",
+                    "published_at": "2026-04-01T00:00:00+00:00",
+                    "text": "Long enough text",
+                    "content_source": "summary",
+                }
+            ],
+        },
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["data", "rss", "preview", "https://example.com/feed.xml", "--since-days", "30"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "lacked parseable dates" in result.output
+
+
+def test_data_rss_import_deduplicates_by_guid(monkeypatch, tmp_path):
+    projects_root = tmp_path / "projects"
+    slug = "rss-test"
+    db_path = projects_root / slug / "project.db"
+    _seed_cli_project(db_path, slug=slug)
+    env = {"POLYPHONY_PROJECTS_DIR": str(projects_root)}
+
+    monkeypatch.setattr(
+        "polyphony.cli.cmd_data.fetch_rss_entries",
+        lambda *args, **kwargs: {
+            "feed_title": "Test Feed",
+            "feed_url": "https://example.com/feed.xml",
+            "total_entries": 2,
+            "entries": [
+                {
+                    "index": 1,
+                    "title": "Duplicate A",
+                    "guid": "shared-guid",
+                    "link": "https://example.com/a",
+                    "text": "This is duplicate content A long enough for import.",
+                    "content_source": "summary",
+                },
+                {
+                    "index": 2,
+                    "title": "Duplicate B",
+                    "guid": "shared-guid",
+                    "link": "https://example.com/b",
+                    "text": "This is duplicate content B long enough for import.",
+                    "content_source": "summary",
+                },
+            ],
+        },
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "--project",
+            slug,
+            "data",
+            "rss",
+            "import",
+            "https://example.com/feed.xml",
+            "--select",
+            "all",
+            "--segment-by",
+            "manual",
+            "--min-length",
+            "5",
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Deduplicated 1 duplicate" in result.output
+
+    conn = connect(db_path)
+    try:
+        project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+        assert project is not None
+        docs_count = fetchone(
+            conn,
+            "SELECT COUNT(*) AS n FROM document WHERE project_id = ?",
+            (project["id"],),
+        )
+        assert docs_count is not None
+        assert docs_count["n"] == 1
+    finally:
+        conn.close()

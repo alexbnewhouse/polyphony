@@ -78,6 +78,45 @@ audio to coded text.
 
 ---
 
+## RSS/Atom Feed Ingestion
+
+polyphony also supports importing textual data from RSS/Atom feeds using
+`polyphony data rss preview` and `polyphony data rss import`.
+
+Methodologically, this acts as a **bounded sampling interface** for publicly
+syndicated sources (news posts, blogs, newsletters, policy bulletins):
+
+1. Researchers preview candidate entries.
+2. They choose explicit entries/ranges to include.
+3. Selected entries are imported as text documents and segmented normally.
+
+### Why explicit selection matters
+
+- Feed ordering is often algorithmic or publisher-controlled.
+- Automatic "import all" can over-represent bursty publication periods.
+- Manual/explicit selection keeps inclusion criteria auditable.
+
+Researchers should define and memo their feed sampling rules (time windows,
+keywords, publication types, and exclusion criteria) before coding.
+
+### Validity caveats
+
+- Feed text can be abbreviated summaries rather than full articles.
+- HTML cleanup can remove layout/contextual cues.
+- Publication metadata quality varies by source.
+
+These are not software bugs; they are source-data properties that should be
+reported as limitations in methods sections.
+
+### Reproducibility implications
+
+Imported feed entries include provenance metadata (feed URL, entry GUID/link,
+timestamp fields, author, tags, and selected content source). This allows
+reviewers to trace each coded segment back to the syndicated source snapshot
+that was available during ingestion.
+
+---
+
 ## Why Two AI Coders?
 
 Using two models (with different seeds) rather than one serves the same purpose

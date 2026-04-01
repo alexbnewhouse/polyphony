@@ -29,6 +29,7 @@ All model calls are logged with full prompts, responses, model versions, tempera
 - **Analytical memos**: Write theoretical/methodological notes throughout
 - **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
 - **Audio transcription ingest**: Upload audio interviews and auto-transcribe to text with local Whisper (`faster-whisper`) or OpenAI transcription APIs
+- **RSS/Atom feed ingest**: Preview and selectively import feed entries into your corpus with provenance metadata
 - **Multiple model providers**: Ollama (local), OpenAI, Anthropic — mix and match across coders
 - **Full replication package**: Every prompt, response, decision, and prompt hash is exportable
 - **Supports multiple methodologies**: Grounded theory, thematic analysis, content analysis
@@ -102,6 +103,14 @@ polyphony data import photos/*.jpg
 # Image URLs from CSV
 polyphony data fetch-images image_urls.csv --url-column url
 
+# RSS/Atom feeds (preview then import selected entries)
+polyphony data rss preview https://example.com/feed.xml --limit 30
+polyphony data rss import https://example.com/feed.xml --select 1,3,5-8
+polyphony data rss import https://example.com/feed.xml --interactive
+
+# Optional feed filtering
+polyphony data rss preview https://example.com/feed.xml --keyword housing --since-days 90
+
 # Audio interviews (transcribe first, then import transcript segments)
 polyphony data transcribe interviews/*.wav
 polyphony data transcribe interview.mp3 --provider openai --model whisper-1
@@ -113,6 +122,9 @@ polyphony data transcribe focus_group.m4a --auto-induce --auto-code
 `data transcribe` stores source audio files under the project `audio/` directory,
 writes transcript text files under `transcripts/`, and imports transcript segments as
 standard text documents with provenance metadata.
+
+`data rss import` stores each selected entry as a document with source metadata
+(feed URL, entry GUID/link, publication timestamp, author, and tags).
 
 ### 4. Build or import a codebook
 
@@ -296,6 +308,8 @@ polyphony practice             Create an offline-first practice sandbox
 
 polyphony data import          Import documents (txt, csv, json, docx)
 polyphony data fetch-images    Fetch image URLs from CSV and import
+polyphony data rss preview     Preview RSS/Atom entries before import
+polyphony data rss import      Import selected RSS/Atom entries
 polyphony data transcribe      Transcribe audio files and import transcript text
 polyphony data list            List imported documents
 polyphony data show            Display a document or its segments
@@ -374,7 +388,7 @@ you can start without Ollama.
 ### Python dependencies
 
 ```
-click, rich, pydantic, ollama, krippendorff, scikit-learn, numpy, pandas, PyYAML, python-docx
+click, rich, pydantic, ollama, krippendorff, scikit-learn, numpy, pandas, PyYAML, defusedxml, python-docx
 ```
 
 **Optional**:

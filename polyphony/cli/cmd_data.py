@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import re
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ from ..db import connect, fetchall, fetchone
 from ..generators import generate_llm_data, generate_template_data, get_domains
 from ..io.fetchers import fetch_images_from_csv
 from ..io.importers import import_documents
+from ..io.rss import entry_to_import_row, fetch_rss_entries, write_entries_json
 from ..io.transcribers import transcribe_audio_file
 from ..utils import build_agent_objects, get_active_codebook
 
@@ -40,6 +42,46 @@ def _next_transcript_path(transcripts_dir: Path, audio_path: Path) -> Path:
         i += 1
 
 
+def _parse_selection(selection: str, max_index: int) -> list[int]:
+    """Parse 1-based index selection strings like '1,3,5-8' or 'all'."""
+    raw = (selection or "").strip().lower()
+    if not raw:
+        raise ValueError("Selection cannot be empty.")
+    if raw == "all":
+        return list(range(1, max_index + 1))
+
+    chosen: set[int] = set()
+    for token in raw.split(","):
+        part = token.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start_str, end_str = part.split("-", 1)
+            try:
+                start = int(start_str)
+                end = int(end_str)
+            except ValueError as exc:
+                raise ValueError(f"Invalid range token: '{part}'") from exc
+            if start <= 0 or end <= 0 or end < start:
+                raise ValueError(f"Invalid range token: '{part}'")
+            for value in range(start, end + 1):
+                if value > max_index:
+                    raise ValueError(f"Selection index {value} exceeds available entries ({max_index}).")
+                chosen.add(value)
+        else:
+            try:
+                value = int(part)
+            except ValueError as exc:
+                raise ValueError(f"Invalid selection token: '{part}'") from exc
+            if value <= 0 or value > max_index:
+                raise ValueError(f"Selection index {value} exceeds available entries ({max_index}).")
+            chosen.add(value)
+
+    if not chosen:
+        raise ValueError("No entries selected.")
+    return sorted(chosen)
+
+
 @click.group()
 def data():
     """Import and inspect corpus documents.
@@ -48,6 +90,226 @@ def data():
     Each segment is a chunk of text (e.g. a paragraph, a few sentences,
     or a fixed word window) that gets assigned one or more codes.
     """
+
+
+@data.group("rss")
+def rss_group():
+    """Preview and import documents from RSS/Atom feeds."""
+
+
+@rss_group.command("preview")
+@click.argument("feed_url")
+@click.option("--limit", default=25, show_default=True, type=click.IntRange(1, 500),
+              help="Maximum entries to show after filtering.")
+@click.option("--keyword", "keywords", multiple=True,
+              help="Filter entries by keyword match (can be provided multiple times).")
+@click.option("--since-days", default=None, type=click.IntRange(1, 3650),
+              help="Include only entries from the last N days.")
+@click.option("--timeout", default=20, show_default=True, type=click.IntRange(1, 120),
+              help="HTTP timeout in seconds.")
+@click.option("--max-size-mb", default=10, show_default=True, type=click.IntRange(1, 100),
+              help="Maximum feed payload size in MB.")
+def rss_preview(feed_url, limit, keywords, since_days, timeout, max_size_mb):
+    """Fetch an RSS/Atom feed and preview candidate entries."""
+    max_feed_bytes = max_size_mb * 1024 * 1024
+    try:
+        result = fetch_rss_entries(
+            feed_url,
+            timeout=timeout,
+            max_feed_bytes=max_feed_bytes,
+            limit=limit,
+            keywords=list(keywords),
+            since_days=since_days,
+        )
+    except Exception as exc:
+        console.print(f"[red]Failed to load feed:[/] {exc}")
+        sys.exit(1)
+
+    entries = result["entries"]
+    if not entries:
+        console.print("[yellow]No matching entries found for this feed/filter combination.[/]")
+        return
+
+    undated_filtered = result.get("undated_filtered_count", 0)
+    if since_days is not None and undated_filtered:
+        console.print(
+            f"[yellow]{undated_filtered} entry(ies) lacked parseable dates and were excluded by --since-days.[/]"
+        )
+
+    console.print(
+        f"[bold]Feed:[/] {result['feed_title']}\n"
+        f"[dim]{len(entries)} shown ({result['total_entries']} total before filters).[/]"
+    )
+
+    table = Table(title="RSS Entries", show_header=True)
+    table.add_column("#", width=4, justify="right")
+    table.add_column("Published", width=16)
+    table.add_column("Title")
+    table.add_column("Chars", width=8, justify="right")
+    table.add_column("Source", width=8)
+
+    for entry in entries:
+        published = (entry.get("published_at") or entry.get("published_raw") or "")[:16]
+        text_len = len((entry.get("text") or "").strip())
+        table.add_row(
+            str(entry["index"]),
+            published,
+            entry.get("title", "Untitled")[:120],
+            str(text_len),
+            entry.get("content_source", ""),
+        )
+    console.print(table)
+
+    console.print("\n[dim]Import selected entries with:[/]")
+    console.print(f"  polyphony data rss import {feed_url} --select 1,3,5-7")
+
+
+@rss_group.command("import")
+@click.argument("feed_url")
+@click.option("--limit", default=100, show_default=True, type=click.IntRange(1, 1000),
+              help="Maximum entries to consider after filtering.")
+@click.option("--keyword", "keywords", multiple=True,
+              help="Filter entries by keyword match (can be provided multiple times).")
+@click.option("--since-days", default=None, type=click.IntRange(1, 3650),
+              help="Include only entries from the last N days.")
+@click.option("--select", default=None,
+              help="1-based indexes/ranges to import (e.g. '1,3,5-8' or 'all').")
+@click.option("--interactive", is_flag=True,
+              help="Prompt for a selection string after previewing entries.")
+@click.option(
+    "--segment-by",
+    default="paragraph",
+    show_default=True,
+    help="Segmentation strategy: paragraph | sentence | fixed:<n_words> | manual",
+)
+@click.option("--min-length", default=20, show_default=True,
+              help="Minimum segment length in characters.")
+@click.option("--timeout", default=20, show_default=True, type=click.IntRange(1, 120),
+              help="HTTP timeout in seconds.")
+@click.option("--max-size-mb", default=10, show_default=True, type=click.IntRange(1, 100),
+              help="Maximum feed payload size in MB.")
+@click.pass_context
+def rss_import(
+    ctx,
+    feed_url,
+    limit,
+    keywords,
+    since_days,
+    select,
+    interactive,
+    segment_by,
+    min_length,
+    timeout,
+    max_size_mb,
+):
+    """Import selected RSS/Atom feed entries as corpus documents."""
+    db_path = ctx.obj.get("db_path")
+    if not db_path:
+        console.print("[red]No active project. Run `polyphony project new` first.[/]")
+        sys.exit(1)
+
+    max_feed_bytes = max_size_mb * 1024 * 1024
+    try:
+        result = fetch_rss_entries(
+            feed_url,
+            timeout=timeout,
+            max_feed_bytes=max_feed_bytes,
+            limit=limit,
+            keywords=list(keywords),
+            since_days=since_days,
+        )
+    except Exception as exc:
+        console.print(f"[red]Failed to load feed:[/] {exc}")
+        sys.exit(1)
+
+    entries = result["entries"]
+    if not entries:
+        console.print("[yellow]No matching entries found for this feed/filter combination.[/]")
+        return
+
+    undated_filtered = result.get("undated_filtered_count", 0)
+    if since_days is not None and undated_filtered:
+        console.print(
+            f"[yellow]{undated_filtered} entry(ies) lacked parseable dates and were excluded by --since-days.[/]"
+        )
+
+    console.print(
+        f"[bold]Feed:[/] {result['feed_title']}\n"
+        f"[dim]{len(entries)} matching entries ready for import.[/]"
+    )
+
+    if interactive:
+        table = Table(title="RSS Entries", show_header=True)
+        table.add_column("#", width=4, justify="right")
+        table.add_column("Published", width=16)
+        table.add_column("Title")
+        for entry in entries:
+            published = (entry.get("published_at") or entry.get("published_raw") or "")[:16]
+            table.add_row(str(entry["index"]), published, entry.get("title", "Untitled")[:120])
+        console.print(table)
+        select = click.prompt("Select entries to import (e.g. 1,3,5-7 or all)", default="all")
+
+    selected_indexes: list[int]
+    try:
+        if select:
+            selected_indexes = _parse_selection(select, max_index=len(entries))
+        else:
+            selected_indexes = list(range(1, len(entries) + 1))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        sys.exit(1)
+
+    selected_set = set(selected_indexes)
+    selected_entries = [entry for entry in entries if entry["index"] in selected_set]
+
+    deduped_entries = []
+    dedupe_seen: set[str] = set()
+    dedupe_skipped = 0
+    for entry in selected_entries:
+        key = (entry.get("guid") or entry.get("link") or "").strip()
+        if key and key in dedupe_seen:
+            dedupe_skipped += 1
+            continue
+        if key:
+            dedupe_seen.add(key)
+        deduped_entries.append(entry)
+    selected_entries = deduped_entries
+
+    if not selected_entries:
+        console.print("[yellow]No entries selected; nothing imported.[/]")
+        return
+
+    rows = [entry_to_import_row(feed_url, entry) for entry in selected_entries]
+
+    conn = connect(db_path)
+    project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+        temp_json_path = Path(tmp.name)
+        write_entries_json(rows, temp_json_path)
+
+    try:
+        import_result = import_documents(
+            conn=conn,
+            project_id=project["id"],
+            paths=[temp_json_path],
+            segment_strategy=segment_by,
+            min_segment_length=min_length,
+            project_dir=db_path.parent,
+        )
+    finally:
+        temp_json_path.unlink(missing_ok=True)
+        conn.close()
+
+    console.print(
+        f"\n[green]RSS import complete:[/] "
+        f"{import_result['documents_imported']} document(s), "
+        f"{import_result['segments_created']} segment(s)."
+    )
+    if import_result["skipped"]:
+        console.print(f"[yellow]Skipped {len(import_result['skipped'])} entry(ies).[/]")
+    if dedupe_skipped:
+        console.print(f"[yellow]Deduplicated {dedupe_skipped} duplicate feed entry(ies) by GUID/link.[/]")
 
 
 @data.command("import")
