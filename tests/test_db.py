@@ -1,7 +1,17 @@
 """Tests for the database layer."""
 
 import pytest
-from polyphony.db import connect, fetchall, fetchone, insert, update, from_json, json_col
+from polyphony.db import (
+    connect,
+    fetchall,
+    fetchone,
+    find_project_db,
+    from_json,
+    insert,
+    json_col,
+    update,
+    write_project_marker,
+)
 
 
 def test_connect_creates_tables(db_path):
@@ -85,3 +95,48 @@ def test_foreign_key_enforcement(conn, project_id):
             "INSERT INTO assignment (coding_run_id, segment_id, code_id, agent_id, is_primary) "
             "VALUES (9999, 9999, 9999, 9999, 1)"
         )
+
+
+def test_write_project_marker_rejects_outside_projects_root(tmp_path, monkeypatch):
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    monkeypatch.setenv("POLYPHONY_PROJECTS_DIR", str(projects_root))
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    outside_project_dir = tmp_path / "outside-project"
+    outside_project_dir.mkdir()
+
+    with pytest.raises(ValueError, match="outside the configured"):
+        write_project_marker(cwd, outside_project_dir)
+
+
+def test_find_project_db_rejects_external_marker_target(tmp_path, monkeypatch):
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    monkeypatch.setenv("POLYPHONY_PROJECTS_DIR", str(projects_root))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside_project_dir = tmp_path / "outside-project"
+    outside_project_dir.mkdir()
+
+    (workspace / ".polyphony_project").write_text(str(outside_project_dir), encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="outside the configured"):
+        find_project_db(workspace)
+
+
+def test_find_project_db_accepts_marker_within_projects_root(tmp_path, monkeypatch):
+    projects_root = tmp_path / "projects"
+    project_dir = projects_root / "demo-project"
+    project_dir.mkdir(parents=True)
+    db_path = project_dir / "project.db"
+    db_path.touch()
+    monkeypatch.setenv("POLYPHONY_PROJECTS_DIR", str(projects_root))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".polyphony_project").write_text(str(project_dir), encoding="utf-8")
+
+    assert find_project_db(workspace) == db_path

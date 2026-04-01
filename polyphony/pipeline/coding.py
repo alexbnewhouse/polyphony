@@ -87,11 +87,49 @@ def code_segment(
     )
 
     images = [image_path] if is_image and image_path else None
-    raw, parsed, call_id = agent.call("coding", system, user, images=images)
-
-    # Parse assignments from response
-    assignments_raw = parsed.get("assignments", [])
-    flags_raw = parsed.get("flags", [])
+    
+    if getattr(agent, "model_name", "") == "human" and hasattr(agent, "code_segment"):
+        import time
+        start = time.time()
+        assignments_temp = agent.code_segment(
+            segment_text=segment_content,
+            codes=codes,
+            document_name=document_name,
+            segment_idx=segment["segment_index"],
+            total_segments=total_segments,
+            image_path=image_path if is_image else None,
+        )
+        assignments_raw = []
+        flags_raw = []
+        for asgn in assignments_temp:
+            if asgn.get("flag"):
+                flags_raw.append({
+                    "flag_type": "human_flag",
+                    "description": asgn.get("reason", "")
+                })
+            else:
+                assignments_raw.append(asgn)
+        parsed = {"assignments": assignments_raw, "flags": flags_raw}
+        duration_ms = int((time.time() - start) * 1000)
+        
+        logged_user_prompt = user
+        if images:
+            logged_user_prompt += "\n\n[Images: " + ", ".join(images) + "]"
+            
+        call_id = agent._log_call(
+            call_type="coding",
+            system_prompt=system,
+            user_prompt=logged_user_prompt,
+            full_response=json.dumps(parsed),
+            parsed_output=parsed,
+            duration_ms=duration_ms,
+            error=None,
+        )
+    else:
+        raw, parsed, call_id = agent.call("coding", system, user, images=images)
+        # Parse assignments from response
+        assignments_raw = parsed.get("assignments", [])
+        flags_raw = parsed.get("flags", [])
     saved_assignments = []
 
     code_name_to_id = {c["name"]: c["id"] for c in codes}

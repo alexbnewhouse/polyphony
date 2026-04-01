@@ -19,14 +19,13 @@ Usage:
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 import click
 from rich.console import Console
 
-from ..db import connect, find_project_db
+from ..db import find_project_db, get_projects_root, project_db_path
 from .cmd_project import project
 from .cmd_data import data
 from .cmd_codebook import codebook
@@ -37,10 +36,9 @@ from .cmd_discuss import discuss
 from .cmd_memo import memo
 from .cmd_analyze import analyze
 from .cmd_export import export
+from .cmd_practice import practice
 
 console = Console()
-
-PROJECTS_ROOT = Path(os.environ.get("POLYPHONY_PROJECTS_DIR", Path.home() / ".polyphony" / "projects"))
 
 
 @click.group()
@@ -75,11 +73,12 @@ def cli(ctx: click.Context, project_slug: str | None) -> None:
         Example: `polyphony project new --name "My Study" --model-a llama3.1:8b --model-b llama3.2:3b`.
         """
     ctx.ensure_object(dict)
-    ctx.obj["projects_root"] = PROJECTS_ROOT
+    projects_root = get_projects_root()
+    ctx.obj["projects_root"] = projects_root
 
     # Resolve active project DB
     if project_slug:
-        db_path = PROJECTS_ROOT / project_slug / "project.db"
+        db_path = project_db_path(projects_root, project_slug)
         if not db_path.exists():
             # Don't abort for project/new or project/list commands
             ctx.obj["db_path"] = db_path
@@ -106,6 +105,7 @@ cli.add_command(discuss)
 cli.add_command(memo)
 cli.add_command(analyze)
 cli.add_command(export)
+cli.add_command(practice)
 
 
 def require_db(ctx: click.Context) -> Path:

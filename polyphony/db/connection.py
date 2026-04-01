@@ -9,7 +9,6 @@ file. This module handles finding, creating, and upgrading that database.
 
 from __future__ import annotations
 
-import importlib.resources
 import json
 import os
 import re
@@ -65,6 +64,27 @@ def get_conn(db_path: Path) -> Generator[sqlite3.Connection, None, None]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def get_projects_root() -> Path:
+    """Return the canonical projects root directory.
+
+    Uses `POLYPHONY_PROJECTS_DIR` when set, otherwise defaults to
+    `~/.polyphony/projects`.
+    """
+    root = Path(os.environ.get("POLYPHONY_PROJECTS_DIR", Path.home() / ".polyphony" / "projects"))
+    return root.expanduser().resolve()
+
+
+def _is_within_projects_root(path: Path) -> bool:
+    """Return True when `path` is inside the configured projects root."""
+    resolved = path.expanduser().resolve()
+    root = get_projects_root()
+    try:
+        resolved.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def find_project_db(start: Path | None = None) -> Path:
     """
     Walk up from `start` (default: cwd) looking for a .polyphony_project marker
@@ -76,8 +96,28 @@ def find_project_db(start: Path | None = None) -> Path:
     for directory in [cwd, *cwd.parents]:
         marker = directory / PROJECT_MARKER
         if marker.exists():
-            project_dir = marker.read_text().strip()
-            return Path(project_dir) / DB_FILENAME
+            marker_value = marker.read_text().strip()
+            if not marker_value:
+                raise FileNotFoundError(
+                    "Found an empty .polyphony_project marker. "
+                    "Run `polyphony project open <slug>` to reset it."
+                )
+
+            project_dir = Path(marker_value).expanduser()
+            if not project_dir.is_absolute():
+                project_dir = (directory / project_dir).resolve()
+            else:
+                project_dir = project_dir.resolve()
+
+            if not _is_within_projects_root(project_dir):
+                root = get_projects_root()
+                raise FileNotFoundError(
+                    "Refusing to use .polyphony_project marker outside the configured "
+                    f"POLYPHONY_PROJECTS_DIR ({root}). "
+                    "Run `polyphony project open <slug>` to select a valid project."
+                )
+
+            return project_dir / DB_FILENAME
     raise FileNotFoundError(
         "No polyphony project found. Run `polyphony project new` or `polyphony project open <slug>`."
     )
@@ -90,7 +130,14 @@ def project_db_path(projects_root: Path, slug: str) -> Path:
 
 def write_project_marker(cwd: Path, project_dir: Path) -> None:
     """Write (or overwrite) the .polyphony_project marker in cwd."""
-    (cwd / PROJECT_MARKER).write_text(str(project_dir))
+    resolved_project_dir = Path(project_dir).expanduser().resolve()
+    if not _is_within_projects_root(resolved_project_dir):
+        root = get_projects_root()
+        raise ValueError(
+            "Refusing to write .polyphony_project outside the configured "
+            f"POLYPHONY_PROJECTS_DIR ({root})."
+        )
+    (cwd / PROJECT_MARKER).write_text(str(resolved_project_dir))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -46,6 +46,17 @@ def test_percent_agreement_empty():
     assert total == 0
 
 
+def test_percent_agreement_missing_data():
+    # Only segments 1, 2, 3 are in the intersection. Segment 4 is missing from b, 5 missing from a.
+    codes_a = {1: {"A"}, 2: {"B"}, 3: {"C"}, 4: {"D"}}
+    codes_b = {1: {"A"}, 2: {"B"}, 3: {"X"}, 5: {"E"}}
+    pct, agree, total = compute_percent_agreement(codes_a, codes_b)
+    # Intersection is {1, 2, 3}. Total = 3, Agree = 2 (segs 1, 2)
+    assert total == 3
+    assert agree == 2
+    assert abs(pct - 2 / 3) < 0.001
+
+
 def test_find_disagreements():
     codes_a = {1: {"CODE_A"}, 2: {"CODE_B"}, 3: {"CODE_A", "CODE_B"}}
     codes_b = {1: {"CODE_A"}, 2: {"CODE_A"}, 3: {"CODE_A"}}

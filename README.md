@@ -95,9 +95,11 @@ polyphony data import interviews/*.docx
 # JSON array
 polyphony data import data.json
 
-# Images (requires a vision-capable model — see Multimodal below)
+# Images (requires a vision-capable model for coding)
 polyphony data import photos/*.jpg
-polyphony data import screenshots/*.png diagrams/*.webp
+
+# Image URLs from CSV
+polyphony data fetch-images image_urls.csv --url-column url
 ```
 
 ### 4. Build or import a codebook
@@ -139,18 +141,18 @@ polyphony code run --deductive                     # deductive (strict codebook 
 
 Both agents code the full corpus independently. Neither sees the other's work.
 
-To code as a third coder yourself (all three coders):
+To code as a third coder yourself:
 
 ```bash
-polyphony code run --agent all                   # you code everything alongside the AIs
-polyphony code run --agent all --sample-size 50   # you code 50 segments, AIs code all
+polyphony code run --agent all
+polyphony code run --agent all --sample-size 50
 ```
 
 ### 7. Compute reliability
 
 ```bash
-polyphony irr compute                # 2-way (A vs B)
-polyphony irr compute --three-way    # 3-way (A vs B vs supervisor) with pairwise kappa table
+polyphony irr compute
+polyphony irr compute --three-way
 ```
 
 ### 8. Discuss disagreements
@@ -177,62 +179,26 @@ polyphony export codebook      # Codebook as YAML/CSV
 polyphony export assignments   # All coding decisions as CSV
 ```
 
----
+### Practice Workflow (Offline by default)
 
-## Multimodal Image Support
-
-polyphony can analyse images alongside text documents. Vision-capable Ollama models (e.g. `llava`, `llama3.2-vision`) code image segments through the standard multimodal message API — the same pipeline stages apply: codebook induction, calibration, independent coding, discussion, and export.
-
-### Setup
+Use practice mode to train on a sandbox project before running real studies.
 
 ```bash
-# Pull a vision-capable model
-ollama pull llava
+# See available offline domains
+polyphony practice --list-domains
 
-# Create a project using a vision model for at least one coder
-polyphony project new --name "Visual Study" --model-a llava --model-b llava
+# Create an offline synthetic sandbox (default mode)
+polyphony practice --domain housing --segments 20
 
-# Optional: install Pillow for image dimension metadata
-pip install polyphony[images]
+# Practice with your own local files in a sandbox
+polyphony practice --source-file transcripts/interview_01.txt --source-file transcripts/interview_02.txt
+
+# Optional: generate synthetic practice data via Ollama
+polyphony practice --topic "climate anxiety among graduate students" --segments 25
 ```
 
-### How it works
-
-- **Supported formats**: PNG, JPEG, GIF, WebP, BMP, TIFF
-- **Import**: Each image becomes a single-segment document with `media_type='image'`. Images are copied to `<project_dir>/images/` with a content-hash prefix for deduplication.
-- **Coding**: When the pipeline encounters an image segment, it sends the image to the vision model alongside the coding prompt. Prompt templates include visual analysis instructions automatically.
-- **Mixed corpora**: You can import text and images into the same project. Text segments are coded by text models; image segments require a vision-capable model.
-- **Replication**: Image file paths are logged in the LLM audit trail. The replication package includes copies of all images and an image count in the manifest.
-
-### Example workflow
-
-```bash
-polyphony data import fieldwork_photos/*.jpg
-polyphony data list                          # media_type column shows 'image' vs 'text'
-polyphony codebook induce --sample-size 10   # vision model describes what it sees
-polyphony code run                           # images coded alongside text
-polyphony code show 42                       # displays image path for image segments
-```
-
----
-
-## Human-as-Lead-Coder
-
-By default, polyphony runs the two LLM agents as coders while you act as supervisor. The human-as-lead-coder mode makes you a full third coder, directly addressing three methodological concerns:
-
-1. **Correlated LLM bias**: Two LLMs may share systematic blind spots that inflate IRR. Adding a human coder breaks this correlation.
-2. **Interpretive sensitivity**: Your domain expertise and lived understanding of the data are captured directly in coding decisions, not just in supervisory review.
-3. **Rubber-stamping risk**: As a third coder rather than a reviewer, you engage with the data at the same level as the AI agents.
-
-### Three coding modes
-
-| Mode | Command | Human codes | LLMs code | IRR |
-|------|---------|------------|-----------|-----|
-| **Default** (supervisor only) | `polyphony code run` | — | All segments | 2-way (A vs B) |
-| **Full 3-way** | `polyphony code run --agent all` | All segments | All segments | 3-way |
-| **Sample** (practical default) | `polyphony code run --agent all --sample-size 50` | 50 random segments | All segments | 3-way on intersection |
-
-For large corpora, the sample mode is recommended. Krippendorff's alpha natively handles partial data, so IRR is computed on the segments all three coders coded.
+Practice mode never auto-runs coding commands for you. It creates a sandbox project,
+imports training data, and then prints the recommended next commands so you stay in control.
 
 ---
 
@@ -296,11 +262,13 @@ Each project is stored in `~/.polyphony/projects/<slug>/`:
 
 ```
 ~/.polyphony/projects/housing-precarity-2026/
-├── project.db          # Single SQLite file containing everything
-└── images/             # Imported images (created when images are imported)
+└── project.db          # Single SQLite file containing everything
 ```
 
 A `.polyphony_project` marker file in your working directory points to the active project.
+
+For safety, marker targets must resolve inside `POLYPHONY_PROJECTS_DIR`.
+If a marker points outside that root, polyphony refuses to use it and asks you to reopen a valid project.
 
 ---
 
@@ -312,7 +280,10 @@ polyphony project open         Set active project
 polyphony project list         List all projects
 polyphony project status       Show pipeline status and counts
 
+polyphony practice             Create an offline-first practice sandbox
+
 polyphony data import          Import documents (txt, csv, json, docx)
+polyphony data fetch-images    Fetch image URLs from CSV and import
 polyphony data list            List imported documents
 polyphony data show            Display a document or its segments
 
@@ -384,6 +355,9 @@ The `.polyphony_project` file in your working directory remembers which project 
   - **OpenAI**: API key in `OPENAI_API_KEY` environment variable
   - **Anthropic**: API key in `ANTHROPIC_API_KEY` environment variable
 
+If you only use offline practice generation (`polyphony practice` without `--topic`) and file import/export,
+you can start without Ollama.
+
 ### Python dependencies
 
 ```
@@ -416,7 +390,7 @@ Try a smaller/faster model, e.g. `llama3.2:3b`, or a quantized variant (`llama3.
 Ollama's seed support varies by model. Some models (e.g. Mistral) are more deterministic than others. For maximum reproducibility, set `--temperature 0.0` when creating the project.
 
 **Image coding fails or returns generic descriptions**
-Make sure you are using a vision-capable model (`llava`, `llama3.2-vision`, etc.). Standard text models cannot process images. Check your model with `ollama show <model>` and look for multimodal capabilities.
+Use a vision-capable model for coding image segments (for example, `llava`).
 
 **Check Ollama logs**
 ```bash

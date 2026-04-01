@@ -120,7 +120,9 @@ def compute_percent_agreement_multiway(
     Multi-rater percent agreement: proportion of segments where ALL coders agree.
     Returns (percent_agreement, n_agree, n_total).
     """
-    all_segs = set().union(*(cm.keys() for cm in codes_maps))
+    if not codes_maps:
+        return 0.0, 0, 0
+    all_segs = set(codes_maps[0].keys()).intersection(*(cm.keys() for cm in codes_maps[1:]))
     if not all_segs:
         return 0.0, 0, 0
     agree = 0
@@ -141,7 +143,7 @@ def compute_cohen_kappa(
     """
     from sklearn.metrics import cohen_kappa_score
 
-    all_segs = sorted(set(codes_a.keys()) | set(codes_b.keys()))
+    all_segs = sorted(set(codes_a.keys()).intersection(set(codes_b.keys())))
     if len(all_segs) < 2:
         return float("nan")
 
@@ -177,7 +179,9 @@ def compute_krippendorff_alpha(
     """
     import krippendorff
 
-    all_segs = sorted(set().union(*(cm.keys() for cm in codes_maps)))
+    if not codes_maps:
+        return float("nan")
+    all_segs = sorted(set(codes_maps[0].keys()).intersection(*(cm.keys() for cm in codes_maps[1:])))
     if len(all_segs) < 2 or not all_codes:
         return float("nan")
 

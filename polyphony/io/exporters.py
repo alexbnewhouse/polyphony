@@ -547,7 +547,7 @@ def load_assignments(path):
 
 a = load_assignments(base / "assignments_agent_a.csv")
 b = load_assignments(base / "assignments_agent_b.csv")
-all_segs = sorted(set(a) | set(b))
+all_segs = sorted(set(a).intersection(set(b)))
 agree = sum(1 for s in all_segs if a.get(s, set()) == b.get(s, set()))
 pct = agree / len(all_segs) if all_segs else 0
 print(f"Segments: {len(all_segs)}")

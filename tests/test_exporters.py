@@ -12,6 +12,7 @@ from polyphony.io.exporters import (
     export_codebook,
     export_llm_log,
     export_memos,
+    export_replication_package,
 )
 
 
@@ -94,3 +95,12 @@ def test_export_llm_log_empty(conn, project_id, tmp_path):
     assert out.exists()
     lines = out.read_text().strip().split("\n") if out.read_text().strip() else []
     assert len(lines) == 0  # no LLM calls in test DB
+
+
+def test_replication_irr_script_uses_intersection(conn, project_id, codebook_version_id, coding_run_ids, tmp_path):
+    out_dir = tmp_path / "replication"
+    export_replication_package(conn, project_id, out_dir)
+
+    script = (out_dir / "scripts" / "compute_irr.py").read_text(encoding="utf-8")
+    assert "set(a).intersection(set(b))" in script
+    assert "set(a) | set(b)" not in script

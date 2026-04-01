@@ -66,6 +66,15 @@ def _is_safe_host(hostname: str) -> bool:
     return True
 
 
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed = urlparse(newurl)
+        if parsed.scheme not in ("http", "https"):
+            raise urllib.error.URLError(f"Redirected to unsupported scheme: {newurl}")
+        if not _is_safe_host(parsed.hostname or ""):
+            raise urllib.error.URLError(f"Redirected to unsafe host: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
 def _download_one(
     url: str,
     images_dir: Path,
@@ -95,13 +104,22 @@ def _download_one(
             "error": "URL points to a private/internal address (blocked for security)",
         }
 
+    opener = urllib.request.build_opener(SafeRedirectHandler())
     filename = _sanitize_filename(url)
     last_error: Optional[str] = None
 
     for attempt in range(2):  # 1 retry
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "polyphony-fetcher/1.0"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with opener.open(req, timeout=timeout) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                if not content_type.startswith("image/"):
+                    return {
+                        "status": "failed",
+                        "url": url,
+                        "metadata": metadata,
+                        "error": f"Invalid content type: {content_type} (not an image)",
+                    }
                 data = resp.read(_MAX_DOWNLOAD_BYTES + 1)
                 if len(data) > _MAX_DOWNLOAD_BYTES:
                     return {

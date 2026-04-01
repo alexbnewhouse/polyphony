@@ -63,9 +63,11 @@ def check_saturation(
     window_size: int = 20,
 ) -> dict:
     """
-    Simple theoretical saturation check: compare the rate of 'new codes per
-    segment' in the first half vs. the second half of coding.
-    A declining rate suggests saturation.
+    Theoretical saturation check: evaluates if novel codes are still emerging.
+    
+    Splits the segment coding timeline into windows of `window_size`.
+    We consider the coding process "likely saturated" if the last three 
+    consecutive windows produced zero new codes.
     """
     rows = fetchall(
         conn,
@@ -104,8 +106,8 @@ def check_saturation(
         "new_codes_per_window": new_codes_per_window,
         "window_size": window_size,
         "likely_saturated": (
-            len(new_codes_per_window) >= 2
-            and new_codes_per_window[-1] == 0
+            len(new_codes_per_window) >= 3
+            and all(n == 0 for n in new_codes_per_window[-3:])
         ),
     }
 

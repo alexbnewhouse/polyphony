@@ -25,6 +25,23 @@ optionally participate as a full third coder for 3-way inter-rater reliability.
 
 ---
 
+## Practice Sandbox Workflow
+
+polyphony includes an offline-first `practice` workflow for training before live analysis.
+
+- By default, practice mode generates synthetic interview segments from template-based
+  domains (no model calls required).
+- Researchers can optionally practice with real local files (`--source-file`) in an
+  isolated sandbox project.
+- LLM-generated synthetic practice data is also available (`--topic`) when Ollama is
+  installed, but this is opt-in rather than the default path.
+
+Methodologically, this separates workflow training from substantive analysis. It helps
+research teams standardize coding procedure, memo conventions, and disagreement review
+before they touch the real corpus.
+
+---
+
 ## Why Two AI Coders?
 
 Using two models (with different seeds) rather than one serves the same purpose
@@ -285,8 +302,8 @@ columns.
    digest to ensure exact reproducibility.
 
 4. **Saturation is approximate.** The saturation check in polyphony is a heuristic
-   (declining rate of new codes) and should not replace theoretical judgment
-   about when the corpus is sufficient.
+  (three consecutive coding windows with zero new codes) and should not
+  replace theoretical judgment about when the corpus is sufficient.
 
 5. **Confidentiality.** Ollama runs locally — your data never leaves your machine.
    When using cloud API providers (OpenAI, Anthropic), your data is sent to
