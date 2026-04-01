@@ -86,7 +86,7 @@ def induce(ctx, sample_size, agent, human_leads):
     conn.close()
 
 
-@codebook.command("import", name="import")
+@codebook.command("import")
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--finalize", is_flag=True, default=False,
               help="Mark the imported codebook as final immediately")
