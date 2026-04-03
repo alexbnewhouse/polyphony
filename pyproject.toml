@@ -48,6 +48,19 @@ diarize = [
     "faster-whisper>=1.0",
     "pyannote.audio>=3.1",
 ]
+gui = [
+    "streamlit>=1.30.0",
+    "plotly>=5.18.0",
+]
+all = [
+    "openai>=1.0",
+    "anthropic>=0.30",
+    "Pillow>=10.0",
+    "faster-whisper>=1.0",
+    "pyannote.audio>=3.1",
+    "streamlit>=1.30.0",
+    "plotly>=5.18.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -58,13 +71,15 @@ dev = [
 
 [project.scripts]
 polyphony = "polyphony.cli.main:cli"
+polyphony-gui = "polyphony_gui.app:launch"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["polyphony*"]
+include = ["polyphony*", "polyphony_gui*"]
 
 [tool.setuptools.package-data]
 polyphony = ["db/migrations/*.sql", "prompt_templates/*.yaml"]
+polyphony_gui = [".streamlit/*.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

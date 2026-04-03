@@ -29,12 +29,14 @@ optionally participate as a full third coder for 3-way inter-rater reliability.
 
 polyphony includes an offline-first `practice` workflow for training before live analysis.
 
-- By default, practice mode generates synthetic interview segments from template-based
-  domains (no model calls required).
-- Researchers can optionally practice with real local files (`--source-file`) in an
-  isolated sandbox project.
-- LLM-generated synthetic practice data is also available (`--topic`) when Ollama is
-  installed, but this is opt-in rather than the default path.
+- From the **CLI**, practice mode generates synthetic interview segments from template-based
+  domains (no model calls required). Researchers can optionally practice with real local
+  files (`--source-file`) in an isolated sandbox project. LLM-generated synthetic practice
+  data is also available (`--topic`) when Ollama is installed, but this is opt-in.
+- From the **web GUI**, a one-click "Create Practice Project" button on the home page
+  provisions a sample project with fictional housing-insecurity interview data. This
+  lets researchers walk through the full GUI workflow (import → codebook → calibration →
+  coding → IRR → export) without configuring models or supplying their own data first.
 
 Methodologically, this separates workflow training from substantive analysis. It helps
 research teams standardize coding procedure, memo conventions, and disagreement review
@@ -484,6 +486,8 @@ When reporting findings from a polyphony-assisted study, we recommend including:
 - Corpus size (documents, segments) and approximate processing time
 - Any prompt modifications made during the study
 - A statement on the role of AI coders vs. human judgment in the final analysis
+- Whether results were obtained through the CLI or the web GUI (both share the same
+  underlying pipeline and database, so analytical validity is identical)
 - For deductive studies: the source and validation status of the imported codebook
 - For podcast/audio studies: transcription provider and model, whether diarization
   was used, speaker count, and any spot-check findings on transcription accuracy
@@ -504,6 +508,7 @@ When reporting findings from a polyphony-assisted study, we recommend including:
 | **Deductive coding** | Applying a pre-existing theoretical codebook to data, as opposed to generating codes from the data. Enabled with `polyphony codebook import` and `polyphony code run --deductive`. |
 | **Diarization** | The process of identifying which speaker is speaking at each point in an audio recording. polyphony uses pyannote.audio for speaker diarization, producing `[SPEAKER_0]`, `[SPEAKER_1]`, etc. labels on transcript segments. |
 | **Flag** | A marker on a segment indicating it needs attention — because of ambiguity, a coder disagreement, or a supervisor note. |
+| **GUI** | The optional Streamlit-based web interface (`polyphony-gui`). Provides the same analytical workflow as the CLI through a browser-based point-and-click interface. Installed via `pip install polyphony[gui]`. |
 | **Grounded theory** | A methodology in which theory is developed inductively from the data through open, axial, and selective coding. |
 | **Inter-rater reliability (IRR)** | A measure of how consistently coders have applied the same codes to the same data. polyphony reports Krippendorff's alpha (primary, 2-way and 3-way), pairwise Cohen's kappa, and percent agreement. |
 | **Krippendorff's alpha (α)** | The primary IRR metric. Ranges from 0 (chance agreement) to 1 (perfect agreement). Values ≥ 0.80 are conventionally acceptable for publication. In 3-way mode, alpha is computed across all three coders natively. |

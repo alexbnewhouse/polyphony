@@ -46,6 +46,9 @@ All model calls are logged with full prompts, responses, model versions, tempera
 # Install polyphony
 pip install polyphony
 
+# For the web GUI (Streamlit):
+pip install polyphony[gui]
+
 # For local models: install Ollama (https://ollama.ai) and pull a model
 ollama pull llama3.1:8b
 
@@ -243,6 +246,35 @@ polyphony practice --topic "climate anxiety among graduate students" --segments 
 
 Practice mode never auto-runs coding commands for you. It creates a sandbox project,
 imports training data, and then prints the recommended next commands so you stay in control.
+
+---
+
+## Web GUI (Streamlit)
+
+Polyphony includes a web-based GUI for researchers who prefer a visual interface. The GUI provides the same full workflow — project creation, data import, codebook induction, calibration, coding, IRR measurement, and export — through a browser-based Streamlit application.
+
+### Install & Launch
+
+```bash
+# Install with GUI extras
+pip install polyphony[gui]
+
+# Launch the GUI
+polyphony-gui
+
+# Or run directly
+python -m polyphony_gui
+```
+
+### Features
+
+- **Tabbed data import**: Upload text files, Word documents, CSVs, images, audio (with transcription), podcasts (from RSS), and RSS/Atom feeds
+- **Practice mode**: One-click sample project to learn the workflow before using your own data
+- **Visual IRR dashboard**: Gauges, per-code agreement tables, and WCAG-accessible labels
+- **File size validation**: 100 MB per file, 500 MB total upload limit
+- **Error sanitization**: Internal errors are logged but never exposed to the user
+- **Codebook validation**: Schema checks on CSV/YAML imports (required fields, valid levels)
+- **Vision model warnings**: Alerts when selected models may not support image analysis
 
 ---
 
@@ -485,6 +517,7 @@ polyphony's test suite is designed to avoid confirmation bias by combining:
 - Integration tests for end-to-end workflows (imports, coding, IRR, export)
 - Adversarial tests that assert failure paths and guardrails (for example: unsafe redirects, invalid marker paths, non-overlapping IRR inputs, incompatible CLI options)
 - Scenario-based orchestration tests for calibration and coding session control flow (resume behavior, superseding incomplete runs, threshold-driven calibration exits, and 3-way calibration paths)
+- GUI service and component tests for the Streamlit layer (upload validation, codebook schema checks, error sanitisation, IRR formatting, model discovery)
 
 Run the full suite:
 
@@ -496,6 +529,12 @@ Run targeted orchestration tests:
 
 ```bash
 pytest tests/test_coding_pipeline.py tests/test_calibration_pipeline.py -q
+```
+
+Run GUI tests:
+
+```bash
+pytest tests/test_gui_services.py tests/test_gui_components.py tests/test_gui_models.py -q
 ```
 
 Run with coverage and missing-lines report:
@@ -525,7 +564,16 @@ Variables use `$variable_name` syntax. Edit these files to adjust the AI's behav
 
 ## For Social Scientists New to Command-Line Tools
 
-If you are not used to working in the terminal, here is a minimal workflow:
+If you are not used to working in the terminal, try the **web GUI** first:
+
+```bash
+pip install polyphony[gui]
+polyphony-gui
+```
+
+This opens a browser-based interface with the full workflow — no terminal commands required beyond the initial setup.
+
+If you prefer the command line, here is a minimal workflow:
 
 1. Open your terminal
 2. Navigate to your project folder: `cd ~/Desktop/my_study`
