@@ -9,7 +9,17 @@
       "Bash(.venv/bin/pytest tests/ -v --tb=short 2>&1 | tail -20)",
       "Bash(.venv/bin/pytest tests/ -q 2>&1 | tail -5)",
       "Bash(.venv/bin/pytest tests/ -q 2>&1 | tail -10)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)",
+      "Bash(wc:*)",
+      "Bash(pip3 install:*)",
+      "Bash(git merge:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)"
     ]
   }
 }

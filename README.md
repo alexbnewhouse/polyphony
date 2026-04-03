@@ -29,7 +29,9 @@ All model calls are logged with full prompts, responses, model versions, tempera
 - **Analytical memos**: Write theoretical/methodological notes throughout
 - **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
 - **Audio transcription ingest**: Upload audio interviews and auto-transcribe to text with local Whisper (`faster-whisper`) or OpenAI transcription APIs
-- **RSS/Atom feed ingest**: Preview and selectively import feed entries into your corpus with provenance metadata
+- **Speaker diarization**: Identify and label individual speakers in multi-speaker audio (podcasts, focus groups) using pyannote.audio, with speaker-turn segmentation
+- **Podcast ingestion pipeline**: End-to-end podcast workflow — preview feeds with download size estimates, download episodes with safety limits, transcribe with diarization, and import with audio timestamps preserved
+- **RSS/Atom feed ingest**: Preview and selectively import feed entries into your corpus with provenance metadata, including full iTunes/podcast namespace parsing
 - **Multiple model providers**: Ollama (local), OpenAI, Anthropic — mix and match across coders
 - **Full replication package**: Every prompt, response, decision, and prompt hash is exportable
 - **Supports multiple methodologies**: Grounded theory, thematic analysis, content analysis
@@ -117,11 +119,27 @@ polyphony data transcribe interview.mp3 --provider openai --model whisper-1
 
 # Optional jumpstart after transcription
 polyphony data transcribe focus_group.m4a --auto-induce --auto-code
+
+# Podcast episodes (end-to-end: download + transcribe + import)
+polyphony data podcast preview https://example.com/feed.xml
+polyphony data podcast ingest https://example.com/feed.xml --select 1-5 --diarize
+polyphony data podcast ingest https://example.com/feed.xml --select all --diarize --auto-induce
+
+# Podcast with speaker count hints
+polyphony data podcast ingest https://example.com/feed.xml --select 1 --diarize --num-speakers 2
+
+# Download podcast audio only (without transcription)
+polyphony data podcast download https://example.com/feed.xml --select 1-10
 ```
 
 `data transcribe` stores source audio files under the project `audio/` directory,
 writes transcript text files under `transcripts/`, and imports transcript segments as
 standard text documents with provenance metadata.
+
+`data podcast ingest` combines download, transcription, optional speaker diarization,
+and import into a single pipeline. Each episode is imported as a document with audio
+timestamps and speaker labels preserved on each segment, enabling per-speaker and
+per-episode analysis.
 
 `data rss import` stores each selected entry as a document with source metadata
 (feed URL, entry GUID/link, publication timestamp, author, and tags).
@@ -189,10 +207,12 @@ polyphony discuss resolve <flag_id>
 ### 9. Analyse
 
 ```bash
-polyphony analyze frequencies    # Which codes appear most?
-polyphony analyze saturation     # Has coding reached saturation?
-polyphony analyze themes         # AI-assisted theme synthesis
-polyphony analyze co-occurrence  # Which codes appear together?
+polyphony analyze frequencies       # Which codes appear most?
+polyphony analyze frequencies-by-doc # Code distribution per document/episode
+polyphony analyze speaker-codes     # Code distribution per speaker (diarized transcripts)
+polyphony analyze saturation        # Has coding reached saturation?
+polyphony analyze themes            # AI-assisted theme synthesis
+polyphony analyze co-occurrence     # Which codes appear together?
 ```
 
 ### 10. Export
@@ -311,6 +331,9 @@ polyphony data fetch-images    Fetch image URLs from CSV and import
 polyphony data rss preview     Preview RSS/Atom entries before import
 polyphony data rss import      Import selected RSS/Atom entries
 polyphony data transcribe      Transcribe audio files and import transcript text
+polyphony data podcast preview Preview podcast feed with download size estimates
+polyphony data podcast download Download podcast episode audio files
+polyphony data podcast ingest  End-to-end: download + transcribe + diarize + import
 polyphony data list            List imported documents
 polyphony data show            Display a document or its segments
 
@@ -341,10 +364,12 @@ polyphony memo new             Write an analytical memo
 polyphony memo list            List all memos
 polyphony memo show            Display a memo
 
-polyphony analyze frequencies  Code frequency table
-polyphony analyze saturation   Theoretical saturation check
-polyphony analyze themes       AI-assisted theme synthesis
-polyphony analyze co-occurrence Code co-occurrence matrix
+polyphony analyze frequencies       Code frequency table
+polyphony analyze frequencies-by-doc Code frequency broken down by document
+polyphony analyze speaker-codes     Code frequency broken down by speaker
+polyphony analyze saturation        Theoretical saturation check
+polyphony analyze themes            AI-assisted theme synthesis
+polyphony analyze co-occurrence     Code co-occurrence matrix
 
 polyphony export codebook      Export codebook (yaml/json/csv)
 polyphony export assignments   Export assignments (csv/json)
@@ -396,6 +421,7 @@ click, rich, pydantic, ollama, krippendorff, scikit-learn, numpy, pandas, PyYAML
 ```bash
 pip install polyphony[images]          # Pillow for image metadata
 pip install polyphony[audio]           # faster-whisper local transcription
+pip install polyphony[diarize]         # Speaker diarization (pyannote.audio + faster-whisper)
 pip install polyphony[openai]          # OpenAI API support
 pip install polyphony[anthropic]       # Anthropic API support
 pip install polyphony[all-providers]   # All cloud providers

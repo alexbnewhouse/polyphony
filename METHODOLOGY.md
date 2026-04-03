@@ -117,6 +117,84 @@ that was available during ingestion.
 
 ---
 
+## Podcast Ingestion Pipeline
+
+polyphony provides an end-to-end pipeline for podcast research via
+`polyphony data podcast preview`, `polyphony data podcast download`, and
+`polyphony data podcast ingest`. This is designed for social scientists
+studying podcasts as qualitative data sources.
+
+### Pipeline stages
+
+1. **Feed preview with safety estimates.** The `preview` command fetches the
+   RSS feed (with full iTunes/podcast namespace parsing), displays episode
+   metadata (season/episode numbers, durations, file sizes), and estimates
+   total download size and disk space requirements.
+2. **Audio download.** Episodes are downloaded with configurable per-episode
+   (default 500 MB) and total (default 5 GB) size limits, SSRF protections,
+   and disk space verification.
+3. **Transcription with optional diarization.** Each episode is transcribed
+   using local Whisper or OpenAI. When `--diarize` is enabled, pyannote.audio
+   identifies individual speakers and labels each segment.
+4. **Timestamp-preserving import.** Whisper segments are imported with their
+   audio timestamps (`audio_start_sec`, `audio_end_sec`) and speaker labels
+   preserved on each database segment, enabling time-aligned analysis.
+
+### Speaker diarization
+
+Speaker diarization (identifying who spoke when) uses pyannote.audio and
+requires a Hugging Face access token (`HF_TOKEN`). It is treated as an
+optional enrichment layer:
+
+- Diarization runs post-transcription and assigns speaker labels to Whisper
+  segments based on temporal overlap.
+- When using `speaker_turn` segmentation (the default for podcast ingest),
+  consecutive same-speaker Whisper segments are merged into turns,
+  preserving the first segment's start time and the last's end time.
+- If diarization dependencies are missing or fail, transcription proceeds
+  without speaker labels — it degrades gracefully rather than failing.
+
+### Segmentation strategy for podcasts
+
+The default segmentation for `podcast ingest` is `speaker_turn`, which
+splits the transcript at speaker changes. This produces analytically
+meaningful units (each speaker's contribution as a segment) rather than
+arbitrary paragraph or word-count boundaries.
+
+Researchers can override this with `--segment-by paragraph` or other
+strategies if speaker-turn granularity is not appropriate for their study.
+
+### Per-episode and per-speaker analysis
+
+After coding, `polyphony analyze frequencies-by-doc` shows code distributions
+broken down by document (i.e., per episode), and `polyphony analyze speaker-codes`
+shows code distributions broken down by speaker label. These are essential for
+comparative podcast analysis — for example, comparing how hosts and guests
+are coded differently, or tracking thematic shifts across episodes.
+
+### Validity caveats
+
+- **Diarization accuracy** depends on audio quality, speaker overlap, and the
+  number of speakers. Researchers should spot-check speaker assignments,
+  especially for episodes with cross-talk or background noise.
+- **Transcription quality** is the primary determinant of coding quality.
+  Domain-specific jargon, accents, and low-quality audio can introduce
+  systematic transcription errors that propagate into coding.
+- **Episode metadata quality** varies by podcast publisher. Not all feeds
+  include enclosure sizes, episode numbers, or duration metadata.
+- **RSS feeds are snapshots.** Feed content may change over time as publishers
+  add, remove, or modify episodes. Record the feed URL and ingestion date.
+
+### Reproducibility implications
+
+Each imported episode carries provenance metadata including: feed URL, feed
+title, episode title, season/episode numbers, publication date, show author,
+transcription provider/model, diarization status, and speaker count. Audio
+files are stored in the project's `audio/` directory. The replication package
+includes all of this for full audit trail from RSS feed to coded segments.
+
+---
+
 ## Why Two AI Coders?
 
 Using two models (with different seeds) rather than one serves the same purpose
@@ -407,6 +485,8 @@ When reporting findings from a polyphony-assisted study, we recommend including:
 - Any prompt modifications made during the study
 - A statement on the role of AI coders vs. human judgment in the final analysis
 - For deductive studies: the source and validation status of the imported codebook
+- For podcast/audio studies: transcription provider and model, whether diarization
+  was used, speaker count, and any spot-check findings on transcription accuracy
 
 ---
 
@@ -422,6 +502,7 @@ When reporting findings from a polyphony-assisted study, we recommend including:
 | **Codebook** | The complete set of codes with their definitions. polyphony tracks multiple versions as the codebook evolves during analysis. |
 | **Codebook induction** | The process of generating candidate codes from the data rather than specifying them in advance. polyphony supports both LLM-assisted induction and human-led induction (`--human-leads`). |
 | **Deductive coding** | Applying a pre-existing theoretical codebook to data, as opposed to generating codes from the data. Enabled with `polyphony codebook import` and `polyphony code run --deductive`. |
+| **Diarization** | The process of identifying which speaker is speaking at each point in an audio recording. polyphony uses pyannote.audio for speaker diarization, producing `[SPEAKER_0]`, `[SPEAKER_1]`, etc. labels on transcript segments. |
 | **Flag** | A marker on a segment indicating it needs attention — because of ambiguity, a coder disagreement, or a supervisor note. |
 | **Grounded theory** | A methodology in which theory is developed inductively from the data through open, axial, and selective coding. |
 | **Inter-rater reliability (IRR)** | A measure of how consistently coders have applied the same codes to the same data. polyphony reports Krippendorff's alpha (primary, 2-way and 3-way), pairwise Cohen's kappa, and percent agreement. |
@@ -431,11 +512,10 @@ When reporting findings from a polyphony-assisted study, we recommend including:
 | **Open coding** | The first stage of coding, in which concepts are identified and labelled without predetermined categories. |
 | **Replication package** | A directory generated by `polyphony export replication` containing all materials needed to verify or reproduce the analysis. |
 | **Saturation** | Theoretical saturation is reached when new data no longer introduces new codes. polyphony estimates this by tracking the rate of new-code emergence. |
-| **Segment** | A unit of text extracted from a document — the basic unit of coding. Can be a paragraph, a group of sentences, or a fixed word window. |
+| **Segment** | A unit of text extracted from a document — the basic unit of coding. Can be a paragraph, a group of sentences, a fixed word window, or a speaker turn (for diarized audio). |
 | **Selective coding** | The final stage of grounded theory coding, integrating categories around a core category. |
 | **Seed** | A number that controls the randomness of an AI model's output. Using a fixed seed (with fixed temperature) produces reproducible results. |
-| **Slug** | A short, URL-friendly identifier for a project derived from its name (e.g. "Housing Precarity Study 2026" → "housing-precarity-study-2026"). Used to open projects from the command line. |
-| **Thematic analysis** | A methodology for identifying, analysing, and reporting patterns (themes) across qualitative data. |
+| **Slug** | A short, URL-friendly identifier for a project derived from its name (e.g. "Housing Precarity Study 2026" → "housing-precarity-study-2026"). Used to open projects from the command line. || **Speaker turn** | A segmentation strategy for diarized audio transcripts that splits text at speaker changes. Each speaker's consecutive utterance becomes one segment, preserving audio timestamps. || **Thematic analysis** | A methodology for identifying, analysing, and reporting patterns (themes) across qualitative data. |
 
 ---
 

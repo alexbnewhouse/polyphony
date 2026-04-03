@@ -14,7 +14,12 @@ from rich.table import Table
 from ..db import connect, fetchall, fetchone
 from ..generators import generate_llm_data, generate_template_data, get_domains
 from ..io.fetchers import fetch_images_from_csv
-from ..io.importers import import_documents
+from ..io.importers import import_documents, import_transcript_with_timestamps
+from ..io.podcast import (
+    download_podcast_episodes,
+    preview_podcast_feed,
+    print_podcast_preview,
+)
 from ..io.rss import entry_to_import_row, fetch_rss_entries, write_entries_json
 from ..io.transcribers import transcribe_audio_file
 from ..utils import build_agent_objects, get_active_codebook
@@ -1018,3 +1023,476 @@ def generate(ctx, domain, topic, model, segments, list_domains, output, seed):
                 code.get("exclusion_criteria", ""),
             )
         console.print(code_table)
+
+
+# ─── Podcast subgroup ──────────────────────────────────────────────────
+
+
+@data.group("podcast")
+def podcast_group():
+    """Preview, download, and ingest podcast episodes."""
+
+
+@podcast_group.command("preview")
+@click.argument("feed_url")
+@click.option("--limit", default=50, show_default=True, type=click.IntRange(1, 1000),
+              help="Maximum episodes to display.")
+@click.option("--keyword", "keywords", multiple=True,
+              help="Filter episodes by keyword match.")
+@click.option("--since-days", default=None, type=click.IntRange(1, 3650),
+              help="Only episodes published in the last N days.")
+@click.option("--timeout", default=20, show_default=True, type=click.IntRange(1, 120),
+              help="HTTP timeout in seconds.")
+def podcast_preview(feed_url, limit, keywords, since_days, timeout):
+    """Preview podcast feed episodes with download size estimates.
+
+    Shows episode listing with season/episode numbers, durations, sizes,
+    and an overall estimate of disk space required to download audio.
+
+    \b
+    Examples:
+        polyphony data podcast preview https://example.com/feed.xml
+        polyphony data podcast preview https://example.com/feed.xml --since-days 90
+    """
+    try:
+        preview = preview_podcast_feed(
+            feed_url,
+            limit=limit,
+            keywords=list(keywords) or None,
+            since_days=since_days,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        console.print(f"[red]Failed to load podcast feed:[/] {exc}")
+        sys.exit(1)
+
+    print_podcast_preview(preview)
+
+    n_audio = preview["download_estimate"]["episodes_with_audio"]
+    if n_audio:
+        console.print(f"\n[dim]Download episodes with:[/]")
+        console.print(f"  polyphony data podcast download {feed_url} --select 1,3,5-8")
+        console.print(f"  polyphony data podcast ingest {feed_url} --select all")
+    else:
+        console.print("\n[yellow]No audio enclosures found in this feed.[/]")
+
+
+@podcast_group.command("download")
+@click.argument("feed_url")
+@click.option("--limit", default=100, show_default=True, type=click.IntRange(1, 1000),
+              help="Maximum episodes to consider.")
+@click.option("--keyword", "keywords", multiple=True,
+              help="Filter episodes by keyword match.")
+@click.option("--since-days", default=None, type=click.IntRange(1, 3650),
+              help="Only episodes published in the last N days.")
+@click.option("--select", default=None,
+              help="1-based indexes/ranges to download (e.g. '1,3,5-8' or 'all').")
+@click.option("--interactive", is_flag=True,
+              help="Prompt for a selection string after previewing episodes.")
+@click.option("--max-episode-mb", default=500, show_default=True, type=click.IntRange(1, 2048),
+              help="Maximum size per episode in MB.")
+@click.option("--max-total-gb", default=5, show_default=True, type=click.IntRange(1, 50),
+              help="Maximum total download size in GB.")
+@click.option("--timeout", default=300, show_default=True, type=click.IntRange(10, 3600),
+              help="Download timeout per episode in seconds.")
+@click.pass_context
+def podcast_download(ctx, feed_url, limit, keywords, since_days, select,
+                     interactive, max_episode_mb, max_total_gb, timeout):
+    """Download podcast episode audio files into the project.
+
+    Audio files are saved to the project's audio/ directory. Use
+    `polyphony data podcast preview` first to see what's available.
+
+    \b
+    Examples:
+        polyphony data podcast download https://example.com/feed.xml --select all
+        polyphony data podcast download https://example.com/feed.xml --select 1-5
+    """
+    db_path = ctx.obj.get("db_path")
+    if not db_path:
+        console.print("[red]No active project. Run `polyphony project new` first.[/]")
+        sys.exit(1)
+
+    try:
+        preview = preview_podcast_feed(
+            feed_url, limit=limit,
+            keywords=list(keywords) or None,
+            since_days=since_days,
+        )
+    except Exception as exc:
+        console.print(f"[red]Failed to load podcast feed:[/] {exc}")
+        sys.exit(1)
+
+    episodes = preview["episodes"]
+    if not episodes:
+        console.print("[yellow]No episodes found.[/]")
+        return
+
+    if interactive:
+        print_podcast_preview(preview)
+        select = click.prompt("Select episodes to download (e.g. 1,3,5-7 or all)", default="all")
+
+    try:
+        if select:
+            selected_indexes = _parse_selection(select, max_index=len(episodes))
+        else:
+            selected_indexes = list(range(1, len(episodes) + 1))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        sys.exit(1)
+
+    selected_set = set(selected_indexes)
+    selected_episodes = [ep for ep in episodes if ep["index"] in selected_set]
+
+    # Filter to episodes that actually have audio URLs
+    audio_episodes = [ep for ep in selected_episodes if ep.get("podcast", {}).get("enclosure_url")]
+    if not audio_episodes:
+        console.print("[yellow]No selected episodes have audio enclosure URLs.[/]")
+        return
+
+    console.print(f"[bold]Downloading {len(audio_episodes)} episode(s)...[/]")
+
+    audio_dir = db_path.parent / "audio"
+    try:
+        results = download_podcast_episodes(
+            audio_episodes,
+            audio_dir,
+            max_per_episode_bytes=max_episode_mb * 1024 * 1024,
+            max_total_bytes=max_total_gb * 1024 * 1024 * 1024,
+            timeout=timeout,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        sys.exit(1)
+
+    downloaded = [r for r in results if r["audio_path"]]
+    failed = [r for r in results if r["error"]]
+
+    console.print(f"\n[green]Downloaded {len(downloaded)} episode(s).[/]")
+    if failed:
+        console.print(f"[yellow]{len(failed)} episode(s) failed:[/]")
+        for r in failed:
+            console.print(f"  [red]-[/] {r['title']}: {r['error']}")
+
+
+@podcast_group.command("ingest")
+@click.argument("feed_url")
+@click.option("--limit", default=100, show_default=True, type=click.IntRange(1, 1000),
+              help="Maximum episodes to consider.")
+@click.option("--keyword", "keywords", multiple=True,
+              help="Filter episodes by keyword match.")
+@click.option("--since-days", default=None, type=click.IntRange(1, 3650),
+              help="Only episodes published in the last N days.")
+@click.option("--select", default=None,
+              help="1-based indexes/ranges to ingest (e.g. '1,3,5-8' or 'all').")
+@click.option("--interactive", is_flag=True,
+              help="Prompt for a selection string after previewing episodes.")
+@click.option(
+    "--provider",
+    type=click.Choice(["local_whisper", "openai"]),
+    default="local_whisper",
+    show_default=True,
+    help="Transcription backend.",
+)
+@click.option("--model", default=None, help="Transcription model name.")
+@click.option("--language", default=None, help="Language hint for transcription.")
+@click.option("--prompt", "transcription_prompt", default=None,
+              help="Context prompt for transcription.")
+@click.option("--diarize", is_flag=True,
+              help="Run speaker diarization (requires pyannote.audio + HF_TOKEN).")
+@click.option("--num-speakers", default=None, type=click.IntRange(1, 20),
+              help="Expected number of speakers for diarization.")
+@click.option("--min-speakers", default=None, type=click.IntRange(1, 20),
+              help="Minimum number of speakers for diarization.")
+@click.option("--max-speakers", default=None, type=click.IntRange(1, 20),
+              help="Maximum number of speakers for diarization.")
+@click.option(
+    "--segment-by",
+    default="speaker_turn",
+    show_default=True,
+    help="Segmentation strategy: speaker_turn | paragraph | sentence | fixed:<n>",
+)
+@click.option("--min-length", default=20, show_default=True,
+              help="Minimum segment length in characters.")
+@click.option("--max-episode-mb", default=500, show_default=True, type=click.IntRange(1, 2048),
+              help="Maximum size per episode in MB.")
+@click.option("--max-total-gb", default=5, show_default=True, type=click.IntRange(1, 50),
+              help="Maximum total download size in GB.")
+@click.option("--auto-induce", is_flag=True,
+              help="Run codebook induction after all episodes are imported.")
+@click.option("--auto-code", is_flag=True,
+              help="Run independent coding (A+B) after import/induction.")
+@click.pass_context
+def podcast_ingest(
+    ctx, feed_url, limit, keywords, since_days, select, interactive,
+    provider, model, language, transcription_prompt, diarize,
+    num_speakers, min_speakers, max_speakers,
+    segment_by, min_length, max_episode_mb, max_total_gb,
+    auto_induce, auto_code,
+):
+    """End-to-end podcast ingestion: download, transcribe, and import.
+
+    This command combines download + transcription + import into a single
+    pipeline. Each episode is downloaded, transcribed (with optional
+    speaker diarization), and imported as a document with audio timestamps
+    preserved on each segment.
+
+    \b
+    Examples:
+        polyphony data podcast ingest https://example.com/feed.xml --select all --diarize
+        polyphony data podcast ingest https://example.com/feed.xml --select 1-3 --provider openai
+    """
+    db_path = ctx.obj.get("db_path")
+    if not db_path:
+        console.print("[red]No active project. Run `polyphony project new` first.[/]")
+        sys.exit(1)
+
+    # ── 1. Fetch feed & select episodes ──
+    try:
+        preview = preview_podcast_feed(
+            feed_url, limit=limit,
+            keywords=list(keywords) or None,
+            since_days=since_days,
+        )
+    except Exception as exc:
+        console.print(f"[red]Failed to load podcast feed:[/] {exc}")
+        sys.exit(1)
+
+    episodes = preview["episodes"]
+    if not episodes:
+        console.print("[yellow]No episodes found.[/]")
+        return
+
+    if interactive:
+        print_podcast_preview(preview)
+        select = click.prompt("Select episodes to ingest (e.g. 1,3,5-7 or all)", default="all")
+
+    try:
+        if select:
+            selected_indexes = _parse_selection(select, max_index=len(episodes))
+        else:
+            selected_indexes = list(range(1, len(episodes) + 1))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        sys.exit(1)
+
+    selected_set = set(selected_indexes)
+    selected_episodes = [ep for ep in episodes if ep["index"] in selected_set]
+
+    audio_episodes = [ep for ep in selected_episodes if ep.get("podcast", {}).get("enclosure_url")]
+    if not audio_episodes:
+        console.print("[yellow]No selected episodes have audio enclosures.[/]")
+        return
+
+    console.print(
+        f"[bold]Ingesting {len(audio_episodes)} episode(s) from:[/] {preview['feed_title']}"
+    )
+
+    # ── 2. Download audio ──
+    audio_dir = db_path.parent / "audio"
+    try:
+        dl_results = download_podcast_episodes(
+            audio_episodes,
+            audio_dir,
+            max_per_episode_bytes=max_episode_mb * 1024 * 1024,
+            max_total_bytes=max_total_gb * 1024 * 1024 * 1024,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        sys.exit(1)
+
+    downloaded = [r for r in dl_results if r["audio_path"]]
+    dl_failed = [r for r in dl_results if r["error"]]
+
+    if dl_failed:
+        console.print(f"[yellow]{len(dl_failed)} download(s) failed:[/]")
+        for r in dl_failed:
+            console.print(f"  [red]-[/] {r['title']}: {r['error']}")
+
+    if not downloaded:
+        console.print("[red]No episodes were downloaded successfully.[/]")
+        sys.exit(1)
+
+    # ── 3. Transcribe + import each episode ──
+    conn = connect(db_path)
+    project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+    project_dir = db_path.parent
+    transcripts_dir = project_dir / "transcripts"
+    transcripts_dir.mkdir(parents=True, exist_ok=True)
+
+    max_audio_bytes = max_episode_mb * 1024 * 1024
+    imported_docs = 0
+    imported_segments = 0
+    failed_transcriptions: list[tuple[str, str]] = []
+
+    # Build mapping from download results back to episode metadata
+    ep_by_index = {ep["index"]: ep for ep in audio_episodes}
+
+    try:
+        for dl in downloaded:
+            audio_path = Path(dl["audio_path"])
+            title = dl["title"] or audio_path.stem
+            ep_meta = ep_by_index.get(dl["index"], {})
+
+            console.print(f"\n  [bold]Transcribing:[/] {title}")
+
+            try:
+                transcribed = transcribe_audio_file(
+                    audio_path,
+                    project_audio_dir=audio_dir,
+                    provider=provider,
+                    model=model,
+                    language=language,
+                    prompt=transcription_prompt,
+                    max_audio_bytes=max_audio_bytes,
+                    diarize=diarize,
+                    num_speakers=num_speakers,
+                    min_speakers=min_speakers,
+                    max_speakers=max_speakers,
+                )
+            except Exception as exc:
+                failed_transcriptions.append((title, str(exc)))
+                console.print(f"    [red]Transcription failed:[/] {exc}")
+                continue
+
+            # Save transcript text
+            transcript_path = _next_transcript_path(transcripts_dir, audio_path)
+            transcript_path.write_text(transcribed["text"], encoding="utf-8")
+
+            # Enrich metadata with podcast info
+            metadata = transcribed["metadata"]
+            podcast_info = ep_meta.get("podcast", {})
+            feed_podcast = ep_meta.get("feed_podcast", {})
+            metadata["podcast"] = {
+                "feed_url": feed_url,
+                "feed_title": preview["feed_title"],
+                "episode_title": ep_meta.get("title"),
+                "episode_number": podcast_info.get("episode_number"),
+                "season_number": podcast_info.get("season_number"),
+                "episode_type": podcast_info.get("episode_type"),
+                "published_at": ep_meta.get("published_at"),
+                "show_author": feed_podcast.get("show_author"),
+                "show_categories": feed_podcast.get("show_categories"),
+            }
+
+            # Use timestamp-aware import if we have Whisper segments
+            whisper_segments = transcribed.get("segments", [])
+            if whisper_segments:
+                import hashlib
+                content_hash = hashlib.sha256(
+                    transcribed["text"].encode("utf-8")
+                ).hexdigest()[:32]
+
+                result = import_transcript_with_timestamps(
+                    conn=conn,
+                    project_id=project["id"],
+                    filename=transcript_path.name,
+                    text=transcribed["text"],
+                    content_hash=content_hash,
+                    metadata=metadata,
+                    transcript_segments=whisper_segments,
+                    segment_strategy=segment_by,
+                    min_segment_length=min_length,
+                    source_path=str(transcript_path),
+                )
+            else:
+                # Fall back to standard text import
+                result = import_documents(
+                    conn=conn,
+                    project_id=project["id"],
+                    paths=[transcript_path],
+                    segment_strategy=segment_by,
+                    min_segment_length=min_length,
+                    metadata_override=metadata,
+                    project_dir=project_dir,
+                )
+
+            imported_docs += result["documents_imported"]
+            imported_segments += result["segments_created"]
+
+            if result["documents_imported"] > 0:
+                console.print(
+                    f"    [green]✓[/] {title} → {transcript_path.name} "
+                    f"({result['segments_created']} segment(s))"
+                )
+            else:
+                console.print(f"    [yellow]-[/] {title}: duplicate or below thresholds")
+
+    finally:
+        conn.close()
+
+    # ── 4. Summary ──
+    console.print(f"\n[green]Podcast ingestion complete:[/]")
+    console.print(f"  Episodes downloaded: {len(downloaded)}")
+    console.print(f"  Documents imported:  {imported_docs}")
+    console.print(f"  Segments created:    {imported_segments}")
+    if diarize and any(
+        r.get("audio_path") for r in dl_results
+    ):
+        console.print(f"  Diarization: enabled")
+    if failed_transcriptions:
+        console.print(f"  [yellow]Transcription failures: {len(failed_transcriptions)}[/]")
+
+    if auto_induce or auto_code:
+        conn = connect(db_path)
+        try:
+            project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+            agent_a, agent_b, supervisor = build_agent_objects(conn, project["id"])
+            active_cb = get_active_codebook(conn, project["id"])
+
+            if auto_induce:
+                from ..pipeline.induction import run_induction
+
+                if agent_a is None:
+                    console.print("[red]Coder A not configured. Cannot run --auto-induce.[/]")
+                else:
+                    cb_id = run_induction(
+                        conn=conn,
+                        project=project,
+                        agent_a=agent_a,
+                        agent_b=agent_b,
+                        sample_size=20,
+                        sample_seed=42,
+                        skip_agent_b=agent_b is None,
+                        human_leads=False,
+                        supervisor_agent=supervisor,
+                        auto_accept_all=True,
+                    )
+                    active_cb = fetchone(
+                        conn, "SELECT * FROM codebook_version WHERE id = ?", (cb_id,)
+                    )
+
+            if auto_code:
+                from ..pipeline.coding import run_coding_session
+
+                if agent_a is None or agent_b is None:
+                    console.print("[red]Both coders required for --auto-code.[/]")
+                elif active_cb is None:
+                    console.print("[red]No codebook. Run --auto-induce first.[/]")
+                else:
+                    console.print("\n[bold]Running independent coding...[/]")
+                    for agent_obj in [agent_a, agent_b]:
+                        run_coding_session(
+                            conn=conn,
+                            project=project,
+                            agent=agent_obj,
+                            codebook_version_id=active_cb["id"],
+                            run_type="independent",
+                            resume=False,
+                            prompt_key="open_coding",
+                        )
+                    conn.execute(
+                        "UPDATE project SET status='irr', updated_at=datetime('now') WHERE id=?",
+                        (project["id"],),
+                    )
+                    conn.commit()
+                    console.print("[green]Auto-coding complete.[/]")
+        finally:
+            conn.close()
+
+    console.print("\n[bold]Suggested next steps[/]")
+    if not auto_induce:
+        console.print("  1. polyphony codebook induce")
+    if not auto_code:
+        console.print("  2. polyphony code run")
+    console.print("  3. polyphony irr compute")

@@ -33,3 +33,6 @@ class Segment(BaseModel):
     created_at: Optional[datetime] = None
     media_type: str = "text"  # "text" or "image"
     image_path: Optional[str] = None
+    audio_start_sec: Optional[float] = None
+    audio_end_sec: Optional[float] = None
+    speaker: Optional[str] = None

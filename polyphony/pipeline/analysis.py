@@ -190,3 +190,65 @@ def synthesize_themes(
 
     _, parsed, _ = agent.call("analysis", system, user)
     return parsed.get("synthesis", parsed.get("response", str(parsed)))
+
+
+def code_frequency_by_document(
+    conn: sqlite3.Connection,
+    project_id: int,
+    run_id: Optional[int] = None,
+) -> List[dict]:
+    """
+    Return code frequencies broken down by document.
+
+    Returns list of dicts with: document_id, filename, code_name, segment_count.
+    Useful for comparing code distributions across podcast episodes.
+    """
+    query = """
+        SELECT d.id AS document_id, d.filename,
+               c.name AS code_name,
+               COUNT(DISTINCT a.segment_id) AS segment_count
+        FROM assignment a
+        JOIN code c ON c.id = a.code_id
+        JOIN segment seg ON seg.id = a.segment_id
+        JOIN document d ON d.id = seg.document_id
+        JOIN coding_run r ON r.id = a.coding_run_id
+        WHERE r.project_id = ?
+    """
+    params: list = [project_id]
+    if run_id:
+        query += " AND a.coding_run_id = ?"
+        params.append(run_id)
+    query += " GROUP BY d.id, c.name ORDER BY d.filename, segment_count DESC"
+    return fetchall(conn, query, tuple(params))
+
+
+def speaker_frequency_table(
+    conn: sqlite3.Connection,
+    project_id: int,
+    run_id: Optional[int] = None,
+) -> List[dict]:
+    """
+    Return code frequencies broken down by speaker label.
+
+    Only segments with a non-null speaker column are included.
+    Useful for analyzing how different podcast speakers are coded.
+
+    Returns list of dicts with: speaker, code_name, segment_count.
+    """
+    query = """
+        SELECT seg.speaker,
+               c.name AS code_name,
+               COUNT(DISTINCT a.segment_id) AS segment_count
+        FROM assignment a
+        JOIN code c ON c.id = a.code_id
+        JOIN segment seg ON seg.id = a.segment_id
+        JOIN coding_run r ON r.id = a.coding_run_id
+        WHERE r.project_id = ?
+          AND seg.speaker IS NOT NULL
+    """
+    params: list = [project_id]
+    if run_id:
+        query += " AND a.coding_run_id = ?"
+        params.append(run_id)
+    query += " GROUP BY seg.speaker, c.name ORDER BY seg.speaker, segment_count DESC"
+    return fetchall(conn, query, tuple(params))

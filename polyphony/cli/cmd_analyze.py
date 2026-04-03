@@ -10,9 +10,11 @@ from rich.console import Console
 from ..db import connect, fetchone
 from ..pipeline.analysis import (
     check_saturation,
+    code_frequency_by_document,
     code_frequency_table,
     co_occurrence_matrix,
     print_code_frequency,
+    speaker_frequency_table,
     synthesize_themes,
 )
 from ..utils import build_agent_objects, get_active_codebook
@@ -150,4 +152,74 @@ def co_occurrence(ctx, top):
     table.add_column("Segments", justify="right")
     for ca, cb, n in pairs[:top]:
         table.add_row(ca, cb, str(n))
+    console.print(table)
+
+
+@analyze.command("frequencies-by-doc")
+@click.pass_context
+def frequencies_by_doc(ctx):
+    """Show code frequency broken down by document (e.g. per episode).
+
+    Useful for comparing how codes are distributed across different
+    podcast episodes or interview transcripts.
+    """
+    db_path = ctx.obj.get("db_path")
+    if not db_path:
+        sys.exit(1)
+
+    conn = connect(db_path)
+    project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+    rows = code_frequency_by_document(conn, project["id"])
+    conn.close()
+
+    if not rows:
+        console.print("[dim]No coding data found.[/]")
+        return
+
+    from rich.table import Table
+    table = Table(title="Code Frequency by Document", show_header=True)
+    table.add_column("Document", style="bold")
+    table.add_column("Code", style="cyan")
+    table.add_column("Segments", justify="right")
+
+    current_doc = None
+    for r in rows:
+        doc_label = r["filename"] if r["filename"] != current_doc else ""
+        current_doc = r["filename"]
+        table.add_row(doc_label, r["code_name"], str(r["segment_count"]))
+    console.print(table)
+
+
+@analyze.command("speaker-codes")
+@click.pass_context
+def speaker_codes(ctx):
+    """Show code frequency broken down by speaker label.
+
+    Only available for transcripts that were imported with speaker
+    diarization. Shows how codes are distributed across speakers.
+    """
+    db_path = ctx.obj.get("db_path")
+    if not db_path:
+        sys.exit(1)
+
+    conn = connect(db_path)
+    project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+    rows = speaker_frequency_table(conn, project["id"])
+    conn.close()
+
+    if not rows:
+        console.print("[dim]No speaker-coded data found. Did you import with --diarize?[/]")
+        return
+
+    from rich.table import Table
+    table = Table(title="Code Frequency by Speaker", show_header=True)
+    table.add_column("Speaker", style="bold")
+    table.add_column("Code", style="cyan")
+    table.add_column("Segments", justify="right")
+
+    current_speaker = None
+    for r in rows:
+        speaker_label = r["speaker"] if r["speaker"] != current_speaker else ""
+        current_speaker = r["speaker"]
+        table.add_row(speaker_label, r["code_name"], str(r["segment_count"]))
     console.print(table)

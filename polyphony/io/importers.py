@@ -12,10 +12,11 @@ Supported formats:
   - .png, .jpg, .jpeg, .gif, .webp, .bmp, .tiff, .tif : images
 
 Segmentation strategies:
-  - paragraph : split on blank lines (default, good for interview transcripts)
-  - sentence  : split on sentence boundaries (requires simple regex)
-  - fixed:<n> : fixed-length windows of n words
-  - manual    : no splitting; each document = one segment
+  - paragraph    : split on blank lines (default, good for interview transcripts)
+  - sentence     : split on sentence boundaries (requires simple regex)
+  - fixed:<n>    : fixed-length windows of n words
+  - manual       : no splitting; each document = one segment
+  - speaker_turn : split on speaker labels like [SPEAKER_0]: (for diarized transcripts)
 
 Image files are always treated as one segment per image (no text segmentation).
 """
@@ -79,6 +80,8 @@ def segment_text(
         if len(stripped) >= min_length:
             return [(stripped, 0, len(stripped))]
         return []
+    elif strategy == "speaker_turn":
+        return _split_speaker_turns(text, min_length)
     elif strategy.startswith("fixed:"):
         try:
             n = int(strategy.split(":")[1])
@@ -92,7 +95,7 @@ def segment_text(
     else:
         raise ValueError(
             f"Unknown segmentation strategy '{strategy}'. "
-            "Choose: paragraph, sentence, fixed:<n>, manual."
+            "Choose: paragraph, sentence, fixed:<n>, manual, speaker_turn."
         )
 
 
@@ -153,6 +156,53 @@ def _split_fixed(text: str, n_words: int, min_length: int) -> List[Tuple[str, in
         result.append((chunk, start, end))
         char_pos = max(0, end - 10)  # small overlap for search
     return result
+
+
+# Speaker-turn pattern: matches lines like "[SPEAKER_0]: text" or "[Host]: text"
+_SPEAKER_TURN_RE = re.compile(
+    r"^\[([^\]]+)\]\s*:\s*(.*)$", re.MULTILINE
+)
+
+
+def _split_speaker_turns(text: str, min_length: int) -> List[Tuple[str, int, int]]:
+    """
+    Split on speaker-turn boundaries.
+
+    Expects transcript text formatted as:
+        [SPEAKER_0]: Some text here...
+        [SPEAKER_1]: Response text...
+
+    Each speaker turn becomes one segment, with the speaker label included.
+    Consecutive lines from the same speaker are merged into one turn.
+    """
+    matches = list(_SPEAKER_TURN_RE.finditer(text))
+
+    if not matches:
+        # Fallback: no speaker labels detected, use paragraph splitting
+        return _split_paragraphs(text, min_length)
+
+    result = []
+    for i, match in enumerate(matches):
+        turn_start = match.start()
+        if i + 1 < len(matches):
+            turn_end = matches[i + 1].start()
+        else:
+            turn_end = len(text)
+
+        # Get the full text for this turn (may span multiple lines)
+        turn_text = text[turn_start:turn_end].strip()
+        if len(turn_text) >= min_length:
+            result.append((turn_text, turn_start, turn_start + len(turn_text)))
+
+    return result
+
+
+def parse_speaker_from_segment(text: str) -> Optional[str]:
+    """Extract speaker label from a speaker-turn formatted segment."""
+    m = _SPEAKER_TURN_RE.match(text)
+    if m:
+        return m.group(1).strip()
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -424,3 +474,162 @@ def import_documents(
         "segments_created": total_segments,
         "skipped": skipped,
     }
+
+
+def import_transcript_with_timestamps(
+    conn: sqlite3.Connection,
+    project_id: int,
+    filename: str,
+    text: str,
+    content_hash: str,
+    metadata: dict,
+    transcript_segments: List[Dict],
+    segment_strategy: str = "speaker_turn",
+    min_segment_length: int = 20,
+    source_path: Optional[str] = None,
+) -> dict:
+    """
+    Import a transcript with audio timestamps and optional speaker labels.
+
+    Unlike import_documents, this function uses Whisper segments directly
+    to preserve audio timestamps and speaker diarization data on each
+    database segment.
+
+    transcript_segments: list of dicts with keys:
+        - text (str)
+        - start (float): audio start seconds
+        - end (float): audio end seconds
+        - speaker (str, optional): speaker label
+    """
+    from ..db import fetchone, insert, json_col
+
+    # Check for duplicates
+    existing = fetchone(
+        conn,
+        "SELECT id FROM document WHERE project_id = ? AND content_hash = ?",
+        (project_id, content_hash),
+    )
+    if existing:
+        return {"documents_imported": 0, "segments_created": 0, "skipped": [filename]}
+
+    doc_id = insert(conn, "document", {
+        "project_id": project_id,
+        "filename": filename,
+        "source_path": source_path,
+        "content": text,
+        "content_hash": content_hash,
+        "char_count": len(text),
+        "word_count": len(text.split()),
+        "metadata": json_col(metadata),
+        "media_type": "text",
+    })
+
+    total_segments = 0
+
+    if transcript_segments and any(seg.get("start") is not None for seg in transcript_segments):
+        # Use Whisper segments directly to preserve timestamps
+        # Optionally merge by speaker turns
+        if segment_strategy == "speaker_turn":
+            merged = _merge_whisper_segments_by_speaker(transcript_segments, min_segment_length)
+        else:
+            merged = transcript_segments
+
+        for seg_idx, seg in enumerate(merged):
+            seg_text = seg.get("text", "").strip()
+            if not seg_text or len(seg_text) < min_segment_length:
+                continue
+
+            speaker = seg.get("speaker")
+
+            # If speaker_turn strategy, try to parse speaker from text as fallback
+            if not speaker and segment_strategy == "speaker_turn":
+                speaker = parse_speaker_from_segment(seg_text)
+
+            char_start = text.find(seg_text)
+            if char_start < 0:
+                char_start = 0
+            char_end = char_start + len(seg_text)
+
+            insert(conn, "segment", {
+                "document_id": doc_id,
+                "project_id": project_id,
+                "segment_index": seg_idx,
+                "text": seg_text,
+                "char_start": char_start,
+                "char_end": char_end,
+                "segment_hash": sha256(seg_text),
+                "is_calibration": 0,
+                "audio_start_sec": seg.get("start"),
+                "audio_end_sec": seg.get("end"),
+                "speaker": speaker,
+            })
+            total_segments += 1
+    else:
+        # No timestamps available — fall back to text-based segmentation
+        segments_data = segment_text(text, segment_strategy, min_segment_length)
+        for seg_idx, (seg_text, char_start, char_end) in enumerate(segments_data):
+            speaker = parse_speaker_from_segment(seg_text) if segment_strategy == "speaker_turn" else None
+            insert(conn, "segment", {
+                "document_id": doc_id,
+                "project_id": project_id,
+                "segment_index": seg_idx,
+                "text": seg_text,
+                "char_start": char_start,
+                "char_end": char_end,
+                "segment_hash": sha256(seg_text),
+                "is_calibration": 0,
+                "speaker": speaker,
+            })
+            total_segments += 1
+
+    if total_segments == 0:
+        conn.execute("DELETE FROM document WHERE id = ?", (doc_id,))
+        return {"documents_imported": 0, "segments_created": 0, "skipped": [filename]}
+
+    conn.execute("UPDATE document SET status = 'segmented' WHERE id = ?", (doc_id,))
+    conn.commit()
+
+    return {"documents_imported": 1, "segments_created": total_segments, "skipped": []}
+
+
+def _merge_whisper_segments_by_speaker(
+    segments: List[Dict],
+    min_length: int = 20,
+) -> List[Dict]:
+    """
+    Merge consecutive Whisper segments from the same speaker into single turns.
+
+    This produces one segment per speaker turn, preserving the start time
+    of the first sub-segment and end time of the last.
+    """
+    if not segments:
+        return []
+
+    merged: List[Dict] = []
+    current = {
+        "text": segments[0].get("text", ""),
+        "start": segments[0].get("start", 0.0),
+        "end": segments[0].get("end", 0.0),
+        "speaker": segments[0].get("speaker"),
+    }
+
+    for seg in segments[1:]:
+        speaker = seg.get("speaker")
+        if speaker and speaker == current.get("speaker"):
+            # Same speaker — merge
+            current["text"] = current["text"] + " " + seg.get("text", "")
+            current["end"] = seg.get("end", current["end"])
+        else:
+            # New speaker or no speaker info — flush current
+            merged.append(current)
+            current = {
+                "text": seg.get("text", ""),
+                "start": seg.get("start", 0.0),
+                "end": seg.get("end", 0.0),
+                "speaker": speaker,
+            }
+
+    merged.append(current)  # flush last
+
+    # If no diarization, return as-is
+    return merged

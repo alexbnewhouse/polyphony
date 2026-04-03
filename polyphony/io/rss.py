@@ -25,11 +25,35 @@ _MAX_FEED_BYTES = 10 * 1024 * 1024
 _CONTENT_NS = "http://purl.org/rss/1.0/modules/content/"
 _DC_NS = "http://purl.org/dc/elements/1.1/"
 _ATOM_NS = "http://www.w3.org/2005/Atom"
+_ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
 _XML_ALLOWED_MIME_HINTS = ("xml", "rss", "atom")
 
 
 def _normalize_space(text: Optional[str]) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
+
+
+def _parse_itunes_duration(value: Optional[str]) -> Optional[float]:
+    """Parse iTunes duration string into seconds.
+
+    Handles formats like:
+        "3600"      -> 3600.0  (seconds only)
+        "01:30:00"  -> 5400.0  (HH:MM:SS)
+        "45:30"     -> 2730.0  (MM:SS)
+    """
+    if not value:
+        return None
+    parts = value.strip().split(":")
+    try:
+        if len(parts) == 1:
+            return float(parts[0])
+        elif len(parts) == 2:
+            return float(parts[0]) * 60 + float(parts[1])
+        elif len(parts) == 3:
+            return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+    except ValueError:
+        pass
+    return None
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -139,6 +163,28 @@ def _parse_rss_items(root: StdET.Element) -> tuple[str, List[Dict[str, Any]]]:
         return "", []
 
     feed_title = _normalize_space(_html_to_text(_find_text(channel, "title")))
+
+    # Podcast feed-level metadata (iTunes namespace)
+    feed_podcast_meta: Dict[str, Any] = {}
+    itunes_author = _find_text(channel, f"{{{_ITUNES_NS}}}author")
+    if itunes_author:
+        feed_podcast_meta["itunes_author"] = _normalize_space(itunes_author)
+    itunes_summary = _find_text(channel, f"{{{_ITUNES_NS}}}summary")
+    if itunes_summary:
+        feed_podcast_meta["itunes_summary"] = _normalize_space(_html_to_text(itunes_summary))
+    itunes_image = channel.find(f"{{{_ITUNES_NS}}}image")
+    if itunes_image is not None:
+        img_href = (itunes_image.get("href") or "").strip()
+        if img_href:
+            feed_podcast_meta["itunes_image_url"] = img_href
+    itunes_explicit = _find_text(channel, f"{{{_ITUNES_NS}}}explicit")
+    if itunes_explicit:
+        feed_podcast_meta["itunes_explicit"] = itunes_explicit.strip().lower()
+    for cat_elem in channel.findall(f"{{{_ITUNES_NS}}}category"):
+        cat_text = (cat_elem.get("text") or "").strip()
+        if cat_text:
+            feed_podcast_meta.setdefault("itunes_categories", []).append(cat_text)
+
     items = channel.findall("item")
     entries: List[Dict[str, Any]] = []
 
@@ -165,21 +211,88 @@ def _parse_rss_items(root: StdET.Element) -> tuple[str, List[Dict[str, Any]]]:
         if not text:
             continue
 
-        entries.append(
-            {
-                "title": title or "Untitled",
-                "link": link,
-                "guid": guid or link,
-                "author": author,
-                "published_at": published_at,
-                "published_raw": published_raw,
-                "summary": description,
-                "content": content_encoded,
-                "text": text,
-                "content_source": source,
-                "tags": tags,
-            }
-        )
+        # Podcast episode-level metadata (iTunes namespace)
+        podcast_meta: Dict[str, Any] = {}
+
+        # Audio enclosure (the actual podcast MP3/M4A file)
+        enclosure = item.find("enclosure")
+        if enclosure is not None:
+            enc_url = (enclosure.get("url") or "").strip()
+            enc_type = (enclosure.get("type") or "").strip()
+            enc_length = (enclosure.get("length") or "").strip()
+            if enc_url:
+                podcast_meta["enclosure_url"] = enc_url
+                podcast_meta["enclosure_type"] = enc_type
+                if enc_length:
+                    try:
+                        podcast_meta["enclosure_length_bytes"] = int(enc_length)
+                    except ValueError:
+                        pass
+
+        # iTunes episode metadata
+        itunes_ep = _find_text(item, f"{{{_ITUNES_NS}}}episode")
+        if itunes_ep:
+            try:
+                podcast_meta["episode_number"] = int(itunes_ep.strip())
+            except ValueError:
+                podcast_meta["episode_number_raw"] = itunes_ep.strip()
+        itunes_season = _find_text(item, f"{{{_ITUNES_NS}}}season")
+        if itunes_season:
+            try:
+                podcast_meta["season_number"] = int(itunes_season.strip())
+            except ValueError:
+                podcast_meta["season_number_raw"] = itunes_season.strip()
+        itunes_duration = _find_text(item, f"{{{_ITUNES_NS}}}duration")
+        if itunes_duration:
+            podcast_meta["itunes_duration"] = itunes_duration.strip()
+            podcast_meta["duration_seconds"] = _parse_itunes_duration(itunes_duration.strip())
+        itunes_ep_type = _find_text(item, f"{{{_ITUNES_NS}}}episodeType")
+        if itunes_ep_type:
+            podcast_meta["episode_type"] = itunes_ep_type.strip().lower()
+        itunes_ep_summary = _find_text(item, f"{{{_ITUNES_NS}}}summary")
+        if itunes_ep_summary:
+            podcast_meta["itunes_summary"] = _normalize_space(_html_to_text(itunes_ep_summary))
+        itunes_ep_author = _find_text(item, f"{{{_ITUNES_NS}}}author")
+        if itunes_ep_author:
+            podcast_meta["itunes_author"] = _normalize_space(itunes_ep_author)
+        itunes_keywords = _find_text(item, f"{{{_ITUNES_NS}}}keywords")
+        if itunes_keywords:
+            podcast_meta["itunes_keywords"] = [
+                kw.strip() for kw in itunes_keywords.split(",") if kw.strip()
+            ]
+        itunes_ep_explicit = _find_text(item, f"{{{_ITUNES_NS}}}explicit")
+        if itunes_ep_explicit:
+            podcast_meta["itunes_explicit"] = itunes_ep_explicit.strip().lower()
+        itunes_ep_image = item.find(f"{{{_ITUNES_NS}}}image")
+        if itunes_ep_image is not None:
+            ep_img_href = (itunes_ep_image.get("href") or "").strip()
+            if ep_img_href:
+                podcast_meta["itunes_image_url"] = ep_img_href
+
+        if not author and podcast_meta.get("itunes_author"):
+            author = podcast_meta["itunes_author"]
+        if not author and feed_podcast_meta.get("itunes_author"):
+            author = feed_podcast_meta["itunes_author"]
+
+        entry: Dict[str, Any] = {
+            "title": title or "Untitled",
+            "link": link,
+            "guid": guid or link,
+            "author": author,
+            "published_at": published_at,
+            "published_raw": published_raw,
+            "summary": description,
+            "content": content_encoded,
+            "text": text,
+            "content_source": source,
+            "tags": tags,
+        }
+        if podcast_meta:
+            entry["podcast"] = podcast_meta
+        if feed_podcast_meta:
+            entry["feed_podcast"] = feed_podcast_meta
+
+        entries.append(entry)
 
     return feed_title, entries
 
@@ -418,6 +531,27 @@ def entry_to_import_row(feed_url: str, entry: Dict[str, Any]) -> Dict[str, Any]:
         "feed_entry_tags": entry.get("tags", []),
         "feed_content_source": entry.get("content_source"),
     }
+
+    # Include podcast-specific metadata if present
+    podcast = entry.get("podcast")
+    if podcast:
+        metadata["podcast_enclosure_url"] = podcast.get("enclosure_url")
+        metadata["podcast_enclosure_type"] = podcast.get("enclosure_type")
+        metadata["podcast_enclosure_length_bytes"] = podcast.get("enclosure_length_bytes")
+        metadata["podcast_episode_number"] = podcast.get("episode_number")
+        metadata["podcast_season_number"] = podcast.get("season_number")
+        metadata["podcast_duration"] = podcast.get("itunes_duration")
+        metadata["podcast_duration_seconds"] = podcast.get("duration_seconds")
+        metadata["podcast_episode_type"] = podcast.get("episode_type")
+        metadata["podcast_itunes_summary"] = podcast.get("itunes_summary")
+        metadata["podcast_itunes_keywords"] = podcast.get("itunes_keywords")
+        metadata["podcast_itunes_explicit"] = podcast.get("itunes_explicit")
+
+    feed_podcast = entry.get("feed_podcast")
+    if feed_podcast:
+        metadata["podcast_show_author"] = feed_podcast.get("itunes_author")
+        metadata["podcast_show_categories"] = feed_podcast.get("itunes_categories")
+
     row: Dict[str, Any] = {"content": entry.get("text", "")}
     row.update(metadata)
     return row

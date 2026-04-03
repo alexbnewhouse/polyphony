@@ -5,7 +5,8 @@ Audio transcription helpers for ingesting interview recordings.
 
 This module is intentionally independent from the coding pipeline:
 - It transcribes audio into text.
-- It records provenance metadata.
+- It optionally performs speaker diarization.
+- It records provenance metadata including audio timestamps.
 - The resulting transcript text can then be imported with existing text workflows.
 """
 
@@ -50,6 +51,110 @@ _DEFAULT_LOCAL_MODEL = "small"
 _DEFAULT_OPENAI_MODEL = "whisper-1"
 _MAX_OPENAI_BYTES = 25 * 1024 * 1024
 _DEFAULT_MAX_AUDIO_BYTES = 500 * 1024 * 1024
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Diarization helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _run_diarization(
+    audio_path: Path,
+    *,
+    num_speakers: Optional[int] = None,
+    min_speakers: Optional[int] = None,
+    max_speakers: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Run speaker diarization on an audio file using pyannote.audio.
+
+    Returns a list of dicts with keys: start, end, speaker.
+    Requires the pyannote.audio package and a Hugging Face auth token
+    (set HF_TOKEN or HUGGING_FACE_HUB_TOKEN).
+    """
+    try:
+        from pyannote.audio import Pipeline as _PyannotePipeline  # type: ignore[import-not-found]
+    except ImportError:
+        raise ImportError(
+            "pyannote.audio is required for speaker diarization. "
+            "Install with: pip install 'polyphony[diarize]'"
+        )
+
+    import os as _os
+    hf_token = (
+        _os.environ.get("HF_TOKEN")
+        or _os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    )
+    if not hf_token:
+        raise ValueError(
+            "Speaker diarization requires a Hugging Face token. "
+            "Set HF_TOKEN or HUGGING_FACE_HUB_TOKEN. "
+            "You must also accept the pyannote model license at "
+            "https://huggingface.co/pyannote/speaker-diarization-3.1"
+        )
+
+    pipeline = _PyannotePipeline.from_pretrained(
+        "pyannote/speaker-diarization-3.1",
+        use_auth_token=hf_token,
+    )
+
+    kwargs: Dict[str, Any] = {}
+    if num_speakers is not None:
+        kwargs["num_speakers"] = num_speakers
+    if min_speakers is not None:
+        kwargs["min_speakers"] = min_speakers
+    if max_speakers is not None:
+        kwargs["max_speakers"] = max_speakers
+
+    diarization = pipeline(str(audio_path), **kwargs)
+
+    result: List[Dict[str, Any]] = []
+    for turn, _, speaker in diarization.itertracks(yield_label=True):
+        result.append({
+            "start": round(float(turn.start), 3),
+            "end": round(float(turn.end), 3),
+            "speaker": speaker,
+        })
+    return result
+
+
+def _assign_speakers_to_segments(
+    whisper_segments: List[Dict[str, Any]],
+    diarization_turns: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Assign speaker labels from diarization to Whisper transcription segments.
+
+    Uses overlap-based matching: each Whisper segment is assigned to the
+    diarization speaker with the most temporal overlap.
+    """
+    for seg in whisper_segments:
+        seg_start = seg["start"]
+        seg_end = seg["end"]
+        best_speaker = "UNKNOWN"
+        best_overlap = 0.0
+
+        for turn in diarization_turns:
+            overlap_start = max(seg_start, turn["start"])
+            overlap_end = min(seg_end, turn["end"])
+            overlap = max(0.0, overlap_end - overlap_start)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = turn["speaker"]
+
+        seg["speaker"] = best_speaker
+
+    return whisper_segments
+
+
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as HH:MM:SS for display."""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    if h > 0:
+        return f"{h:d}:{m:02d}:{s:02d}"
+    return f"{m:d}:{s:02d}"
 
 
 def _normalize_language(language: Optional[str]) -> Optional[str]:
@@ -129,6 +234,10 @@ def _transcribe_local_whisper(
     model: str,
     language: Optional[str],
     prompt: Optional[str],
+    diarize: bool = False,
+    num_speakers: Optional[int] = None,
+    min_speakers: Optional[int] = None,
+    max_speakers: Optional[int] = None,
 ) -> Dict[str, Any]:
     if _WhisperModel is None:
         raise ImportError(
@@ -163,12 +272,41 @@ def _transcribe_local_whisper(
     detected_language = getattr(info, "language", None)
     duration = getattr(info, "duration", None)
 
+    # Diarization: assign speaker labels to each segment
+    diarization_applied = False
+    if diarize:
+        try:
+            diarization_result = _run_diarization(
+                audio_path,
+                num_speakers=num_speakers,
+                min_speakers=min_speakers,
+                max_speakers=max_speakers,
+            )
+            segments = _assign_speakers_to_segments(segments, diarization_result)
+            diarization_applied = True
+            # Rebuild transcript with speaker labels
+            labelled_pieces = []
+            for seg in segments:
+                speaker = seg.get("speaker", "UNKNOWN")
+                labelled_pieces.append(f"[{speaker}]: {seg['text']}")
+            transcript = "\n\n".join(labelled_pieces).strip()
+        except ImportError as exc:
+            import warnings
+            warnings.warn(
+                f"Diarization skipped (missing dependency): {exc}. "
+                "Install with: pip install 'polyphony[diarize]'"
+            )
+        except Exception as exc:
+            import warnings
+            warnings.warn(f"Diarization failed, proceeding without speaker labels: {exc}")
+
     return {
         "text": transcript,
         "model": model,
         "language": detected_language or language,
         "duration_seconds": float(duration) if duration is not None else None,
         "segments": segments,
+        "diarization_applied": diarization_applied,
     }
 
 
@@ -229,6 +367,10 @@ def transcribe_audio_file(
     language: Optional[str] = None,
     prompt: Optional[str] = None,
     max_audio_bytes: int = _DEFAULT_MAX_AUDIO_BYTES,
+    diarize: bool = False,
+    num_speakers: Optional[int] = None,
+    min_speakers: Optional[int] = None,
+    max_speakers: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Transcribe one audio file and return transcript + provenance metadata.
@@ -237,7 +379,8 @@ def transcribe_audio_file(
     - text: transcript string
     - metadata: provenance metadata for document.metadata
     - stored_audio_path: canonical copied audio path
-    - segments: optional timestamped transcription chunks
+    - segments: timestamped transcription chunks (with optional speaker labels)
+    - diarization_applied: whether diarization was successfully applied
     """
     source_path = Path(source_path)
     if not source_path.exists():
@@ -284,6 +427,10 @@ def transcribe_audio_file(
             model=chosen_model,
             language=language_code,
             prompt=prompt,
+            diarize=diarize,
+            num_speakers=num_speakers,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
         )
     else:
         chosen_model = model or _DEFAULT_OPENAI_MODEL
@@ -314,11 +461,23 @@ def transcribe_audio_file(
         "transcription_duration_seconds": result.get("duration_seconds"),
         "transcription_segment_count": len(result.get("segments", [])),
         "transcription_prompt_used": bool(prompt),
+        "diarization_applied": result.get("diarization_applied", False),
     }
+
+    # Collect unique speakers if diarization was applied
+    if result.get("diarization_applied"):
+        speakers = sorted({
+            seg.get("speaker", "UNKNOWN")
+            for seg in result.get("segments", [])
+            if seg.get("speaker")
+        })
+        metadata["speakers"] = speakers
+        metadata["speaker_count"] = len(speakers)
 
     return {
         "text": transcript_text,
         "metadata": metadata,
         "stored_audio_path": audio_meta["stored_audio_path"],
         "segments": result.get("segments", []),
+        "diarization_applied": result.get("diarization_applied", False),
     }
