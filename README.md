@@ -43,19 +43,23 @@ All model calls are logged with full prompts, responses, model versions, tempera
 ### 1. Install
 
 ```bash
-# Install polyphony
-pip install polyphony
+# Clone the repository
+git clone https://github.com/alexbnewhouse/polyphony.git
+cd polyphony
+
+# Install polyphony (editable install)
+pip install -e .
 
 # For the web GUI (Streamlit):
-pip install polyphony[gui]
+pip install -e ".[gui]"
 
 # For local models: install Ollama (https://ollama.ai) and pull a model
 ollama pull llama3.1:8b
 
 # For cloud APIs (optional):
-pip install polyphony[openai]      # OpenAI / Azure OpenAI
-pip install polyphony[anthropic]   # Anthropic (Claude)
-pip install polyphony[all-providers]  # Both
+pip install -e ".[openai]"          # OpenAI / Azure OpenAI
+pip install -e ".[anthropic]"       # Anthropic (Claude)
+pip install -e ".[all-providers]"   # Both
 ```
 
 ### 2. Create a project
