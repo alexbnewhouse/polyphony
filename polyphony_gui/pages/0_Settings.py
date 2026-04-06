@@ -34,12 +34,101 @@ st.markdown(
 # ─────────────────────────────────────────────────────────────────────────────
 # Tab layout
 # ─────────────────────────────────────────────────────────────────────────────
-tab_providers, tab_models, tab_options, tab_env = st.tabs([
+tab_setup, tab_providers, tab_models, tab_options, tab_env = st.tabs([
+    "🔧 Setup Wizard",
     "Provider Status",
     "Available Models",
     "Settings Reference",
     "Environment Variables",
 ])
+
+# ── Setup Wizard (LLM Onboarding) ────────────────────────────────────────────
+with tab_setup:
+    st.markdown("### Hardware Detection & LLM Recommendations")
+    st.markdown(
+        "Not sure which AI models to use? Click below to scan your hardware "
+        "and get personalized recommendations."
+    )
+
+    if st.button("🔍 Detect My Hardware", type="primary"):
+        with st.spinner("Scanning hardware and checking Ollama…"):
+            from polyphony.onboarding import run_onboarding
+            result = run_onboarding()
+            st.session_state["onboarding_result"] = result
+
+    if "onboarding_result" in st.session_state:
+        result = st.session_state["onboarding_result"]
+        hw = result.hardware
+
+        # Hardware summary
+        st.markdown("#### Your Hardware")
+        col_hw1, col_hw2, col_hw3 = st.columns(3)
+        col_hw1.metric("RAM", f"{hw.ram_gb:.1f} GB")
+        col_hw2.metric("CPU Cores", str(hw.cpu_cores))
+        if hw.gpus:
+            col_hw3.metric("GPU", f"{hw.gpus[0].name} ({hw.gpus[0].vram_gb:.1f} GB)")
+        elif hw.apple_silicon:
+            col_hw3.metric("GPU", "Apple Silicon")
+        else:
+            col_hw3.metric("GPU", "None detected")
+
+        # Ollama status
+        if hw.ollama_running:
+            st.success(f"✅ Ollama is running — {len(hw.ollama_models)} model(s) installed")
+            if hw.ollama_models:
+                st.caption("Installed: " + ", ".join(hw.ollama_models))
+        elif hw.ollama_installed:
+            st.warning("⚠️ Ollama is installed but not running. Start it with `ollama serve`")
+        else:
+            st.info("ℹ️ Ollama is not installed. Install it from https://ollama.ai for free local models.")
+
+        # Tier indicator
+        tier_display = {
+            "local_high": ("🟢 High", "Your machine can run large local models (8B+ parameters) comfortably."),
+            "local_mid": ("🟡 Medium", "Your machine can run mid-size local models (3B parameters)."),
+            "local_low": ("🟡 Low", "Your machine can run small models, but slowly on CPU."),
+            "cloud_only": ("🔴 Cloud Only", "Local inference is impractical. Use cloud providers."),
+        }
+        tier_label, tier_desc = tier_display.get(result.tier, ("?", ""))
+        st.markdown(f"**Local capability:** {tier_label} — {tier_desc}")
+
+        # Warnings
+        for w in result.warnings:
+            st.warning(w)
+
+        # Recommendations table
+        st.markdown("#### Recommended Models")
+        import pandas as pd
+        rec_rows = []
+        for r in result.recommendations:
+            rec_rows.append({
+                "Provider": r.provider.title(),
+                "Model": r.model_name,
+                "Description": r.label,
+                "Speed": r.estimated_speed.title(),
+                "Cost": {"free": "Free", "$": "$", "$$": "$$", "$$$": "$$$"}.get(r.estimated_cost, r.estimated_cost),
+                "Vision": "✅" if r.supports_vision else "—",
+            })
+        st.dataframe(pd.DataFrame(rec_rows), use_container_width=True, hide_index=True)
+
+        # Setup steps
+        if result.setup_steps:
+            st.markdown("#### Next Steps")
+            for i, step in enumerate(result.setup_steps, 1):
+                st.markdown(f"{i}. {step}")
+
+        # Quick-start command
+        if result.recommendations:
+            top = result.recommendations[0]
+            if top.provider == "ollama":
+                cmd = f'polyphony project new --name "My Study" --model-a {top.model_name} --model-b {top.model_name}'
+            else:
+                cmd = (f'polyphony project new --name "My Study" '
+                       f'--provider-a {top.provider} --model-a {top.model_name} '
+                       f'--provider-b {top.provider} --model-b {top.model_name}')
+            st.markdown("#### Quick Start Command")
+            st.code(cmd, language="bash")
+            st.caption("Or use the **Projects** page to create a project through the GUI.")
 
 # ── Provider Status ───────────────────────────────────────────────────────────
 with tab_providers:

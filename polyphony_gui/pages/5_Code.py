@@ -132,6 +132,38 @@ if run_btn:
     project_row = db_fetchone(conn, "SELECT * FROM project WHERE id = ?", (project_id,))
     agent_a, agent_b, _ = build_agent_objects(conn, project_id)
 
+    # Pre-check model availability before starting long-running coding
+    availability_ok = True
+    agents_to_run = []
+    if coder_choice in ("both", "coder_a"):
+        agents_to_run.append(("Coder A", agent_a))
+    if coder_choice in ("both", "coder_b"):
+        agents_to_run.append(("Coder B", agent_b))
+
+    for label, ag in agents_to_run:
+        if ag and hasattr(ag, "is_available") and not ag.is_available():
+            agent_type = type(ag).__name__
+            if "Ollama" in agent_type:
+                st.error(
+                    f"**{label}** model `{ag.model_name}` is not available in Ollama. "
+                    f"Run `ollama pull {ag.model_name}` in your terminal, or check that Ollama is running."
+                )
+            elif "OpenAI" in agent_type:
+                st.error(
+                    f"**{label}** cannot reach OpenAI. Check that `OPENAI_API_KEY` is set correctly."
+                )
+            elif "Anthropic" in agent_type:
+                st.error(
+                    f"**{label}** cannot reach Anthropic. Check that `ANTHROPIC_API_KEY` is set correctly."
+                )
+            else:
+                st.error(f"**{label}** model `{ag.model_name}` is not available.")
+            availability_ok = False
+
+    if not availability_ok:
+        conn.close()
+        st.stop()
+
     n_segs = db_fetchone(
         conn, "SELECT COUNT(*) AS n FROM segment WHERE project_id = ?", (project_id,)
     )["n"]

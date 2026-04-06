@@ -30,8 +30,12 @@ def parse_json(text: str) -> Dict[str, Any]:
     3. Find the first ``{ ... }`` block via regex.
 
     Returns an empty dict on failure so callers always get a dict back.
+    Logs a warning when all parse strategies fail.
     """
+    import logging
     import re
+
+    logger = logging.getLogger("polyphony.agents")
 
     # Try direct parse first
     try:
@@ -55,6 +59,8 @@ def parse_json(text: str) -> Dict[str, Any]:
         except json.JSONDecodeError:
             pass
 
+    preview = text[:200] + ("…" if len(text) > 200 else "")
+    logger.warning("JSON parse failed on LLM response: %s", preview)
     return {}
 
 

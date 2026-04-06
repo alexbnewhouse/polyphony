@@ -40,6 +40,26 @@ st.markdown(
     "High agreement means your codebook is clear and the results are trustworthy."
 )
 
+with st.expander("ℹ️ Understanding IRR metrics", expanded=False):
+    st.markdown("""
+**Krippendorff's α** is the gold standard for inter-rater reliability in qualitative research.
+It corrects for chance agreement and handles missing data. Values:
+
+| α | Interpretation |
+|---|----------------|
+| ≥ 0.80 | Acceptable for published research |
+| 0.67–0.79 | Tentative conclusions only |
+| < 0.67 | Unreliable — revise codebook |
+
+**Cohen's κ** is a pairwise agreement measure, also chance-corrected.
+
+**% Agreement** is the simplest measure (fraction of segments with identical coding),
+but does not account for chance, so it tends to look better than it is.
+
+For multi-code assignments (a segment can have multiple codes), polyphony uses a
+binary presence/absence matrix per code to compute all metrics.
+""")
+
 # ── Compute IRR ───────────────────────────────────────────────────────────────
 st.markdown("### Compute IRR")
 
@@ -260,23 +280,3 @@ if all_irr:
         "Date": (r.get("computed_at") or "")[:10],
     } for r in all_irr]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-with st.expander("ℹ️ Understanding IRR metrics"):
-    st.markdown("""
-**Krippendorff's α** is the gold standard for inter-rater reliability in qualitative research.
-It corrects for chance agreement and handles missing data. Values:
-
-| α | Interpretation |
-|---|----------------|
-| ≥ 0.80 | Acceptable for published research |
-| 0.67–0.79 | Tentative conclusions only |
-| < 0.67 | Unreliable — revise codebook |
-
-**Cohen's κ** is a pairwise agreement measure, also chance-corrected.
-
-**% Agreement** is the simplest measure (fraction of segments with identical coding),
-but does not account for chance, so it tends to look better than it is.
-
-For multi-code assignments (a segment can have multiple codes), polyphony uses a
-binary presence/absence matrix per code to compute all metrics.
-""")

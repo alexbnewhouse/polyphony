@@ -37,6 +37,7 @@ from .cmd_memo import memo
 from .cmd_analyze import analyze
 from .cmd_export import export
 from .cmd_practice import practice
+from .cmd_setup import setup
 
 console = Console()
 
@@ -106,6 +107,7 @@ cli.add_command(memo)
 cli.add_command(analyze)
 cli.add_command(export)
 cli.add_command(practice)
+cli.add_command(setup)
 
 
 def require_db(ctx: click.Context) -> Path:

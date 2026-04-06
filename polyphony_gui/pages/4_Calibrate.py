@@ -126,6 +126,20 @@ if run_btn:
     project_row = db_fetchone(conn, "SELECT * FROM project WHERE id = ?", (project_id,))
     agent_a, agent_b, _ = build_agent_objects(conn, project_id)
 
+    # Pre-check model availability
+    for label, ag in [("Coder A", agent_a), ("Coder B", agent_b)]:
+        if ag and hasattr(ag, "is_available") and not ag.is_available():
+            agent_type = type(ag).__name__
+            if "Ollama" in agent_type:
+                st.error(
+                    f"**{label}** model `{ag.model_name}` is not available. "
+                    f"Run `ollama pull {ag.model_name}` or check that Ollama is running."
+                )
+            else:
+                st.error(f"**{label}** model `{ag.model_name}` is not reachable. Check your API key and network.")
+            conn.close()
+            st.stop()
+
     with st.spinner("Marking calibration segments…"):
         n_marked = mark_calibration_set(conn, project_id, n=n_cal, clear_existing=clear_existing)
         conn.commit()
@@ -184,8 +198,57 @@ if run_btn:
     else:
         st.warning(
             f"Calibration below threshold (α = {alpha:.3f} < {threshold}). "
-            "Consider reviewing your codebook and running calibration again."
+            "Review the per-code breakdown below to identify which codes need clearer definitions."
         )
+
+    # Per-code agreement breakdown
+    try:
+        codes_a_map, codes_b_map, all_codes = get_coding_matrix(
+            conn, run_id_a, run_id_b, scope="calibration"
+        )
+        all_segs = set(codes_a_map.keys()) | set(codes_b_map.keys())
+        if all_codes and all_segs:
+            st.markdown("### Per-Code Agreement")
+            st.caption("Codes with low agreement are highlighted — consider revising their definitions.")
+            per_code_rows = []
+            for code in sorted(all_codes):
+                agree = sum(
+                    1 for seg in all_segs
+                    if (code in codes_a_map.get(seg, set())) == (code in codes_b_map.get(seg, set()))
+                )
+                pct_code = (agree / len(all_segs) * 100) if all_segs else 0
+                per_code_rows.append({"Code": code, "% Agreement": f"{pct_code:.1f}%"})
+
+            import pandas as pd
+            df_per = pd.DataFrame(per_code_rows)
+
+            def _style_pct(val):
+                try:
+                    v = float(str(val).replace("%", ""))
+                    if v >= 80:
+                        return "background-color: #d4edda"
+                    elif v >= 60:
+                        return "background-color: #fff3cd"
+                    else:
+                        return "background-color: #f8d7da"
+                except (ValueError, TypeError):
+                    return ""
+
+            st.dataframe(
+                df_per.style.map(_style_pct, subset=["% Agreement"]),
+                use_container_width=True, hide_index=True,
+            )
+
+            # Actionable advice for low-agreement codes
+            low_codes = [r["Code"] for r in per_code_rows if float(r["% Agreement"].replace("%", "")) < 60]
+            if low_codes:
+                st.info(
+                    f"**Action needed:** The following codes have < 60% agreement and should be clarified: "
+                    f"**{', '.join(low_codes)}**. "
+                    "Go to the **Codebook** page to tighten their inclusion/exclusion criteria, then re-calibrate."
+                )
+    except Exception:
+        pass  # Per-code breakdown is optional; don't block calibration workflow
 
     # Show disagreements (already computed by compute_irr)
     disagreements = irr.get("disagreements", [])

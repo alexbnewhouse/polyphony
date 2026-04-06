@@ -40,6 +40,20 @@ All model calls are logged with full prompts, responses, model versions, tempera
 
 ## Quick Start
 
+### 0. Check your setup (optional)
+
+```bash
+polyphony setup
+```
+
+This scans your hardware (RAM, GPU, Ollama status) and recommends the best model configuration for your machine. It detects:
+- **Local GPU/VRAM** — NVIDIA GPUs and Apple Silicon unified memory
+- **System RAM** — to assess whether local inference is practical
+- **Ollama status** — whether it's installed and running, which models are pulled
+- **API keys** — whether OpenAI/Anthropic keys are set
+
+Based on your hardware, it recommends local models (free, private) or cloud providers (faster, higher quality), and prints the exact next steps to get started. The same wizard is available in the GUI under **Settings → Setup Wizard**.
+
 ### 1. Install
 
 #### Using `uv` (recommended)
@@ -400,6 +414,8 @@ polyphony project new          Create a new project
 polyphony project open         Set active project
 polyphony project list         List all projects
 polyphony project status       Show pipeline status and counts
+
+polyphony setup                Detect hardware and get LLM setup recommendations
 
 polyphony practice             Create an offline-first practice sandbox
 

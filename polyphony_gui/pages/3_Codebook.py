@@ -384,8 +384,10 @@ with tab_import_csv:
             if file_name.endswith(".csv"):
                 df = pd.read_csv(io.BytesIO(raw))
                 st.dataframe(df.head(10), use_container_width=True, hide_index=True)
+                # Case-insensitive column matching
+                df.columns = [c.lower().strip() for c in df.columns]
                 if "name" not in df.columns:
-                    st.error("CSV must have a 'name' column.")
+                    st.error("CSV must have a 'name' column (case-insensitive).")
                 else:
                     parsed_rows = df.to_dict(orient="records")
             else:
