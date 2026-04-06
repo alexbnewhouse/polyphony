@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -186,7 +187,7 @@ def setup(json_output: bool) -> None:
         console.print(vis_table)
         console.print(
             "  [dim]Vision models can code images alongside text. "
-            "Install Pillow: pip install 'polyphony[images]'[/]"
+            "Install Pillow: pip install 'polyphony\\[images]'[/]"
         )
         if result.tier in ("local_high", "local_mid"):
             console.print(
@@ -228,11 +229,11 @@ def setup(json_output: bool) -> None:
         if result.faster_whisper_installed:
             status_parts.append("[green]faster-whisper ✓[/]")
         else:
-            status_parts.append("[yellow]faster-whisper ✗[/] — pip install 'polyphony[audio]'")
+            status_parts.append("[yellow]faster-whisper ✗[/] — pip install 'polyphony\\[audio]'")
         if result.pyannote_installed:
             status_parts.append("[green]pyannote.audio ✓[/]")
         else:
-            status_parts.append("[yellow]pyannote.audio ✗[/] — pip install 'polyphony[diarize]'")
+            status_parts.append("[yellow]pyannote.audio ✗[/] — pip install 'polyphony\\[diarize]'")
         console.print(f"  Packages: {' | '.join(status_parts)}")
         console.print(
             "  [dim]Whisper model sizes: tiny (39M) → base (74M) → small (244M) "
@@ -245,7 +246,7 @@ def setup(json_output: bool) -> None:
         console.print()
         console.print("[bold]Next steps:[/]")
         for i, step in enumerate(result.setup_steps, 1):
-            console.print(f"  {i}. {step}")
+            console.print(f"  {i}. {escape(step)}")
 
     # ── Quick-start suggestion ───────────────────────────────────────
     top = result.recommendations[0] if result.recommendations else None
