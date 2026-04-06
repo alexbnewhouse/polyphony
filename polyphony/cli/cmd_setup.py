@@ -61,9 +61,24 @@ def setup(json_output: bool) -> None:
                     "label": r.label,
                     "speed": r.estimated_speed,
                     "cost": r.estimated_cost,
+                    "vision": r.supports_vision,
                 }
                 for r in result.recommendations
             ],
+            "whisper_recommendations": [
+                {
+                    "model_size": w.model_size,
+                    "label": w.label,
+                    "speed": w.estimated_speed,
+                    "vram_gb": w.estimated_vram_gb,
+                    "local": w.local,
+                }
+                for w in result.whisper_recommendations
+            ],
+            "audio": {
+                "faster_whisper_installed": result.faster_whisper_installed,
+                "pyannote_installed": result.pyannote_installed,
+            },
             "setup_steps": result.setup_steps,
             "warnings": result.warnings,
         }
@@ -157,6 +172,73 @@ def setup(json_output: bool) -> None:
         )
 
     console.print(rec_table)
+
+    # ── Multimodal capabilities ──────────────────────────────────────
+    vision_recs = [r for r in result.recommendations if r.supports_vision]
+    if vision_recs:
+        console.print()
+        vis_table = Table(title="🖼️  Multimodal (Vision) Models", border_style="magenta")
+        vis_table.add_column("Provider", style="bold")
+        vis_table.add_column("Model")
+        vis_table.add_column("Notes")
+        for r in vision_recs:
+            vis_table.add_row(r.provider.title(), r.model_name, r.label)
+        console.print(vis_table)
+        console.print(
+            "  [dim]Vision models can code images alongside text. "
+            "Install Pillow: pip install 'polyphony[images]'[/]"
+        )
+        if result.tier in ("local_high", "local_mid"):
+            console.print(
+                "  [dim]Local vision via Ollama: "
+                "ollama pull llava:7b  (7B, ~4 GB VRAM) or  "
+                "ollama pull llava:13b (13B, ~8 GB VRAM)[/]"
+            )
+
+    # ── Audio transcription ──────────────────────────────────────────
+    if result.whisper_recommendations:
+        console.print()
+        wh_table = Table(title="🎙️  Audio Transcription (Whisper)", border_style="cyan")
+        wh_table.add_column("Model", style="bold")
+        wh_table.add_column("Type")
+        wh_table.add_column("Description")
+        wh_table.add_column("Speed")
+        wh_table.add_column("VRAM / RAM")
+
+        for wr in result.whisper_recommendations:
+            speed_map = {
+                "fast": "[green]Fast[/]",
+                "moderate": "[yellow]Moderate[/]",
+                "slow": "[red]Slow[/]",
+            }
+            model_type = "Cloud" if not wr.local else "Local"
+            vram_label = "—" if wr.estimated_vram_gb == 0.0 else f"~{wr.estimated_vram_gb:.1f} GB"
+            wh_table.add_row(
+                wr.model_size,
+                model_type,
+                wr.label,
+                speed_map.get(wr.estimated_speed, wr.estimated_speed),
+                vram_label,
+            )
+
+        console.print(wh_table)
+
+        # Whisper install status
+        status_parts = []
+        if result.faster_whisper_installed:
+            status_parts.append("[green]faster-whisper ✓[/]")
+        else:
+            status_parts.append("[yellow]faster-whisper ✗[/] — pip install 'polyphony[audio]'")
+        if result.pyannote_installed:
+            status_parts.append("[green]pyannote.audio ✓[/]")
+        else:
+            status_parts.append("[yellow]pyannote.audio ✗[/] — pip install 'polyphony[diarize]'")
+        console.print(f"  Packages: {' | '.join(status_parts)}")
+        console.print(
+            "  [dim]Whisper model sizes: tiny (39M) → base (74M) → small (244M) "
+            "→ medium (769M) → large-v3 (1.5B params).  "
+            "Larger ≈ better accuracy but slower & more VRAM.[/]"
+        )
 
     # ── Setup steps ──────────────────────────────────────────────────
     if result.setup_steps:

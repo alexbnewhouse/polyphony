@@ -73,13 +73,27 @@ class ModelRecommendation:
 
 
 @dataclass
+class WhisperRecommendation:
+    """A recommended Whisper transcription model."""
+    model_size: str        # "tiny", "base", "small", "medium", "large-v3"
+    label: str
+    reason: str
+    estimated_speed: str   # "fast", "moderate", "slow"
+    estimated_vram_gb: float  # approximate VRAM/RAM needed
+    local: bool = True     # True = faster-whisper, False = OpenAI API
+
+
+@dataclass
 class OnboardingResult:
     """Complete onboarding assessment."""
     hardware: HardwareProfile
     tier: str              # "local_high", "local_mid", "local_low", "cloud_only"
     recommendations: list[ModelRecommendation] = field(default_factory=list)
+    whisper_recommendations: list[WhisperRecommendation] = field(default_factory=list)
     setup_steps: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    faster_whisper_installed: bool = False
+    pyannote_installed: bool = False
 
 
 # ─── Hardware detection ──────────────────────────────────────────────────────
@@ -187,6 +201,24 @@ def _check_ollama() -> tuple[bool, bool, list[str]]:
             logger.debug("Ollama check failed", exc_info=True)
 
     return installed, running, models
+
+
+def _check_faster_whisper() -> bool:
+    """Check if faster-whisper is installed."""
+    try:
+        import faster_whisper  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _check_pyannote() -> bool:
+    """Check if pyannote.audio is installed."""
+    try:
+        import pyannote.audio  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 def detect_hardware() -> HardwareProfile:
@@ -353,6 +385,71 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
             "We recommend cloud providers (OpenAI or Anthropic)."
         )
 
+    # ── Audio transcription (Whisper) recommendations ────────────────
+    whisper_recs: list[WhisperRecommendation] = []
+    faster_whisper_ok = _check_faster_whisper()
+    pyannote_ok = _check_pyannote()
+
+    if tier == "local_high":
+        whisper_recs.append(WhisperRecommendation(
+            model_size="large-v3",
+            label="Whisper Large V3 — Best accuracy",
+            reason="Your GPU can handle the largest Whisper model for "
+                   "highest-quality transcription.",
+            estimated_speed="moderate",
+            estimated_vram_gb=4.0,
+        ))
+        whisper_recs.append(WhisperRecommendation(
+            model_size="medium",
+            label="Whisper Medium — Good balance of speed & accuracy",
+            reason="Faster than large-v3 with minimal quality loss.",
+            estimated_speed="fast",
+            estimated_vram_gb=2.5,
+        ))
+    elif tier == "local_mid":
+        whisper_recs.append(WhisperRecommendation(
+            model_size="small",
+            label="Whisper Small — Recommended for your hardware",
+            reason="Best accuracy that fits comfortably in your available VRAM.",
+            estimated_speed="fast",
+            estimated_vram_gb=1.5,
+        ))
+        whisper_recs.append(WhisperRecommendation(
+            model_size="medium",
+            label="Whisper Medium — Higher quality, slower",
+            reason="Fits in VRAM but will be noticeably slower.",
+            estimated_speed="moderate",
+            estimated_vram_gb=2.5,
+        ))
+    elif tier == "local_low":
+        whisper_recs.append(WhisperRecommendation(
+            model_size="base",
+            label="Whisper Base — Lightweight for CPU inference",
+            reason="Reasonable quality at low resource cost. "
+                   "Runs on CPU without a GPU.",
+            estimated_speed="moderate",
+            estimated_vram_gb=0.5,
+        ))
+        whisper_recs.append(WhisperRecommendation(
+            model_size="tiny",
+            label="Whisper Tiny — Fastest, lowest accuracy",
+            reason="Transcribes quickly on CPU but quality may suffer "
+                   "with accents or technical vocabulary.",
+            estimated_speed="fast",
+            estimated_vram_gb=0.3,
+        ))
+
+    # Always offer cloud Whisper as alternative
+    whisper_recs.append(WhisperRecommendation(
+        model_size="whisper-1",
+        label="OpenAI Whisper API — Cloud transcription",
+        reason="No local resources needed. 25 MB file-size limit per request. "
+               "~$0.006/min. Requires OPENAI_API_KEY.",
+        estimated_speed="fast",
+        estimated_vram_gb=0.0,
+        local=False,
+    ))
+
     # ── Setup steps ──────────────────────────────────────────────────
     if tier != "cloud_only":
         if not hw.ollama_installed:
@@ -367,6 +464,18 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
         top_local = next((r for r in recommendations if r.provider == "ollama"), None)
         if top_local and top_local.model_name not in hw.ollama_models:
             setup_steps.append(f"Pull model: run `ollama pull {top_local.model_name}`")
+
+    # Audio setup steps
+    if not faster_whisper_ok:
+        setup_steps.append(
+            "For audio transcription: pip install 'polyphony[audio]' "
+            "(installs faster-whisper for local Whisper)"
+        )
+    if not pyannote_ok:
+        setup_steps.append(
+            "For speaker diarization: pip install 'polyphony[diarize]' "
+            "(requires HF_TOKEN — see https://huggingface.co/pyannote/speaker-diarization-3.1)"
+        )
 
     if any(r.provider == "openai" for r in recommendations):
         if not os.environ.get("OPENAI_API_KEY"):
@@ -384,8 +493,11 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
         hardware=hw,
         tier=tier,
         recommendations=recommendations,
+        whisper_recommendations=whisper_recs,
         setup_steps=setup_steps,
         warnings=warnings,
+        faster_whisper_installed=faster_whisper_ok,
+        pyannote_installed=pyannote_ok,
     )
 
 

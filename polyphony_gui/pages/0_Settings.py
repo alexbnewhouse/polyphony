@@ -111,6 +111,68 @@ with tab_setup:
             })
         st.dataframe(pd.DataFrame(rec_rows), use_container_width=True, hide_index=True)
 
+        # Multimodal (vision) info
+        vision_recs = [r for r in result.recommendations if r.supports_vision]
+        if vision_recs:
+            st.markdown("#### Multimodal (Vision) Models")
+            st.markdown(
+                "These models can analyse **images alongside text** — useful for "
+                "coding visual data such as photos, diagrams, or screenshots."
+            )
+            vis_rows = []
+            for r in vision_recs:
+                vis_rows.append({
+                    "Provider": r.provider.title(),
+                    "Model": r.model_name,
+                    "Description": r.label,
+                })
+            st.dataframe(pd.DataFrame(vis_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                "Install Pillow for image support: `pip install 'polyphony[images]'`  \n"
+                "Local vision via Ollama: `ollama pull llava:7b` (~4 GB VRAM) "
+                "or `ollama pull llava:13b` (~8 GB VRAM)"
+            )
+
+        # Audio transcription (Whisper) section
+        if result.whisper_recommendations:
+            st.markdown("#### Audio Transcription (Whisper)")
+            st.markdown(
+                "Polyphony can transcribe interview recordings using "
+                "[faster-whisper](https://github.com/SYSTRAN/faster-whisper) (local) "
+                "or the OpenAI Whisper API (cloud)."
+            )
+            wh_rows = []
+            for wr in result.whisper_recommendations:
+                wh_rows.append({
+                    "Model": wr.model_size,
+                    "Type": "Cloud" if not wr.local else "Local",
+                    "Description": wr.label,
+                    "Speed": wr.estimated_speed.title(),
+                    "VRAM / RAM": "—" if wr.estimated_vram_gb == 0.0 else f"~{wr.estimated_vram_gb:.1f} GB",
+                })
+            st.dataframe(pd.DataFrame(wh_rows), use_container_width=True, hide_index=True)
+
+            col_fw, col_pa = st.columns(2)
+            with col_fw:
+                if result.faster_whisper_installed:
+                    st.success("faster-whisper installed ✓")
+                else:
+                    st.warning("faster-whisper not installed")
+                    st.code("pip install 'polyphony[audio]'", language="bash")
+            with col_pa:
+                if result.pyannote_installed:
+                    st.success("pyannote.audio installed ✓")
+                else:
+                    st.info("pyannote.audio not installed (optional, for speaker diarization)")
+                    st.code("pip install 'polyphony[diarize]'", language="bash")
+
+            st.caption(
+                "**Whisper model sizes:** tiny (39M) → base (74M) → small (244M) → "
+                "medium (769M) → large-v3 (1.5B params).  \n"
+                "Larger models give better accuracy but need more VRAM and run slower.  \n"
+                "Speaker diarization requires a Hugging Face token (`HF_TOKEN`)."
+            )
+
         # Setup steps
         if result.setup_steps:
             st.markdown("#### Next Steps")

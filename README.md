@@ -51,8 +51,15 @@ This scans your hardware (RAM, GPU, Ollama status) and recommends the best model
 - **System RAM** — to assess whether local inference is practical
 - **Ollama status** — whether it's installed and running, which models are pulled
 - **API keys** — whether OpenAI/Anthropic keys are set
+- **Audio packages** — whether `faster-whisper` and `pyannote.audio` are installed
 
-Based on your hardware, it recommends local models (free, private) or cloud providers (faster, higher quality), and prints the exact next steps to get started. The same wizard is available in the GUI under **Settings → Setup Wizard**.
+Based on your hardware, it recommends:
+- **Coding models** — local models (free, private) or cloud providers (faster, higher quality)
+- **Multimodal / vision models** — models that can code images alongside text (LLaVA, GPT-4o, Claude)
+- **Whisper transcription models** — local Whisper model size (tiny → large-v3) matched to your VRAM, plus cloud alternative
+- **Speaker diarization** — install status and setup steps for `pyannote.audio`
+
+It prints the exact next steps to get started. The same wizard is available in the GUI under **Settings → Setup Wizard**.
 
 ### 1. Install
 
@@ -415,7 +422,7 @@ polyphony project open         Set active project
 polyphony project list         List all projects
 polyphony project status       Show pipeline status and counts
 
-polyphony setup                Detect hardware and get LLM setup recommendations
+polyphony setup                Detect hardware and get LLM, audio & vision setup recommendations
 
 polyphony practice             Create an offline-first practice sandbox
 

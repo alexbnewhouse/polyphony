@@ -11,6 +11,9 @@ from polyphony.onboarding import (
     HardwareProfile,
     ModelRecommendation,
     OnboardingResult,
+    WhisperRecommendation,
+    _check_faster_whisper,
+    _check_pyannote,
     _classify_tier,
     detect_hardware,
     generate_recommendations,
@@ -205,6 +208,111 @@ class TestDataClasses:
         )
         assert r.requires_api_key is False
         assert r.supports_vision is False
+
+    def test_whisper_recommendation_fields(self):
+        w = WhisperRecommendation(
+            model_size="small",
+            label="Test Whisper",
+            reason="Test reason",
+            estimated_speed="fast",
+            estimated_vram_gb=1.5,
+        )
+        assert w.local is True
+        assert w.estimated_vram_gb == 1.5
+
+    def test_whisper_recommendation_cloud(self):
+        w = WhisperRecommendation(
+            model_size="whisper-1",
+            label="Cloud",
+            reason="Cloud",
+            estimated_speed="fast",
+            estimated_vram_gb=0.0,
+            local=False,
+        )
+        assert w.local is False
+
+
+# ─── Whisper recommendations ─────────────────────────────────────────────────
+
+
+class TestWhisperRecommendations:
+    def test_local_high_recommends_large_v3(self):
+        hw = _make_hw(
+            ram_total_mb=32768,
+            gpus=[GPUInfo(name="RTX 4090", vram_mb=24576)],
+        )
+        result = generate_recommendations(hw)
+        local_whisper = [w for w in result.whisper_recommendations if w.local]
+        assert any("large-v3" in w.model_size for w in local_whisper)
+
+    def test_local_mid_recommends_small(self):
+        hw = _make_hw(
+            ram_total_mb=16384,
+            gpus=[GPUInfo(name="RTX 3060", vram_mb=6144)],
+        )
+        result = generate_recommendations(hw)
+        local_whisper = [w for w in result.whisper_recommendations if w.local]
+        assert any("small" in w.model_size for w in local_whisper)
+
+    def test_local_low_recommends_base(self):
+        hw = _make_hw(ram_total_mb=8192, gpus=[])
+        result = generate_recommendations(hw)
+        local_whisper = [w for w in result.whisper_recommendations if w.local]
+        assert any("base" in w.model_size for w in local_whisper)
+
+    def test_cloud_only_has_no_local_whisper(self):
+        hw = _make_hw(ram_total_mb=4096, gpus=[])
+        result = generate_recommendations(hw)
+        local_whisper = [w for w in result.whisper_recommendations if w.local]
+        assert len(local_whisper) == 0
+
+    def test_always_includes_cloud_whisper(self):
+        hw = _make_hw(
+            ram_total_mb=32768,
+            gpus=[GPUInfo(name="RTX 4090", vram_mb=24576)],
+        )
+        result = generate_recommendations(hw)
+        cloud_whisper = [w for w in result.whisper_recommendations if not w.local]
+        assert len(cloud_whisper) >= 1
+        assert any("whisper-1" in w.model_size for w in cloud_whisper)
+
+    def test_onboarding_result_has_audio_fields(self):
+        hw = _make_hw(ram_total_mb=16384)
+        result = generate_recommendations(hw)
+        assert isinstance(result.faster_whisper_installed, bool)
+        assert isinstance(result.pyannote_installed, bool)
+
+
+# ─── Audio dependency detection ──────────────────────────────────────────────
+
+
+class TestAudioDetection:
+    @patch.dict("sys.modules", {"faster_whisper": None})
+    def test_check_faster_whisper_missing(self):
+        # When the import raises ImportError, should return False
+        with patch("builtins.__import__", side_effect=ImportError):
+            assert _check_faster_whisper() is False
+
+    @patch.dict("sys.modules", {"pyannote": None, "pyannote.audio": None})
+    def test_check_pyannote_missing(self):
+        with patch("builtins.__import__", side_effect=ImportError):
+            assert _check_pyannote() is False
+
+    def test_setup_steps_include_audio_when_missing(self):
+        hw = _make_hw(ram_total_mb=16384)
+        with patch("polyphony.onboarding._check_faster_whisper", return_value=False), \
+             patch("polyphony.onboarding._check_pyannote", return_value=False):
+            result = generate_recommendations(hw)
+        assert any("polyphony[audio]" in step for step in result.setup_steps)
+        assert any("polyphony[diarize]" in step for step in result.setup_steps)
+
+    def test_no_audio_setup_steps_when_installed(self):
+        hw = _make_hw(ram_total_mb=16384)
+        with patch("polyphony.onboarding._check_faster_whisper", return_value=True), \
+             patch("polyphony.onboarding._check_pyannote", return_value=True):
+            result = generate_recommendations(hw)
+        assert not any("polyphony[audio]" in step for step in result.setup_steps)
+        assert not any("polyphony[diarize]" in step for step in result.setup_steps)
 
 
 # ─── Integration ──────────────────────────────────────────────────────────────
