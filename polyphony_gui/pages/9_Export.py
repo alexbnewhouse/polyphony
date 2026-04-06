@@ -227,8 +227,8 @@ with tab_audit:
         with st.expander("Preview recent calls"):
             conn = connect(Path(db_path))
             recent = conn.execute(
-                """SELECT call_type, model_name, prompt_tokens, completion_tokens,
-                          duration_ms, created_at
+                """SELECT call_type, model_name, input_tokens, output_tokens,
+                          duration_ms, called_at
                    FROM llm_call WHERE project_id = ?
                    ORDER BY id DESC LIMIT 20""",
                 (project_id,),
@@ -238,10 +238,10 @@ with tab_audit:
                 df_log = pd.DataFrame([{
                     "Type": r["call_type"],
                     "Model": r["model_name"],
-                    "Prompt tokens": r.get("prompt_tokens") or "—",
-                    "Response tokens": r.get("completion_tokens") or "—",
+                    "Prompt tokens": r.get("input_tokens") or "—",
+                    "Response tokens": r.get("output_tokens") or "—",
                     "Duration (ms)": r.get("duration_ms") or "—",
-                    "Time": (r.get("created_at") or "")[:16],
+                    "Time": (r.get("called_at") or "")[:16],
                 } for r in recent])
                 st.dataframe(df_log, use_container_width=True, hide_index=True)
 
