@@ -169,9 +169,12 @@ with tab_disagreements:
         run_a = a_runs[0]
         run_b = b_runs[0]
 
-        from polyphony.pipeline.irr import find_disagreements
+        from polyphony.pipeline.irr import find_disagreements, get_coding_matrix
 
-        disagreements = find_disagreements(conn, run_a["id"], run_b["id"])
+        codes_a_map, codes_b_map, _all_codes = get_coding_matrix(
+            conn, run_a["id"], run_b["id"], scope="all"
+        )
+        disagreements = find_disagreements(codes_a_map, codes_b_map)
         conn.close()
 
         if not disagreements:

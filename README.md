@@ -233,6 +233,7 @@ polyphony codebook import --finalize theory_codes.csv # import and finalize in o
 
 ```bash
 polyphony calibrate run
+polyphony calibrate run --batch            # batch segments for fewer LLM calls
 ```
 
 Both AIs code a small calibration set. Disagreements are reviewed with agent explanations, and you refine code definitions until reliability is acceptable (Krippendorff's α ≥ 0.80 by default).
@@ -248,9 +249,15 @@ polyphony calibrate run --include-supervisor
 ```bash
 polyphony code run                                 # inductive (default)
 polyphony code run --deductive                     # deductive (strict codebook adherence)
+polyphony code run --batch                         # batch segments for fewer LLM calls
 ```
 
 Both agents code the full corpus independently. Neither sees the other's work.
+
+The `--batch` flag groups multiple segments into each LLM call, fitting as many
+as the model's context window allows. This reduces the total number of API calls
+and can speed up coding significantly for large corpora. Image segments are
+always coded individually.
 
 To code as a third coder yourself:
 
@@ -445,9 +452,9 @@ polyphony codebook edit        Edit a code in $EDITOR
 polyphony codebook finalize    Mark codebook as final
 polyphony codebook history     Show all codebook versions
 
-polyphony calibrate run        Run calibration round(s) (--include-supervisor)
+polyphony calibrate run        Run calibration round(s) (--include-supervisor, --batch)
 
-polyphony code run             Run independent coding (--agent all, --sample-size, --deductive)
+polyphony code run             Run independent coding (--agent all, --sample-size, --deductive, --batch)
 polyphony code status          Show coding progress
 polyphony code show            Show codes for a specific segment
 

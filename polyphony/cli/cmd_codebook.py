@@ -36,24 +36,23 @@ def codebook():
               show_default=True, help="Which agent(s) run induction")
 @click.option("--human-leads", is_flag=True, default=False,
               help="Human proposes codes first, then sees LLM suggestions")
+@click.option("--skip-referee", is_flag=True, default=False,
+              help="Skip the referee deduplication pass")
 @click.pass_context
-def induce(ctx, sample_size, agent, human_leads):
+def induce(ctx, sample_size, agent, human_leads, skip_referee):
     """
     Generate an initial codebook inductively from your data.
 
     Each agent independently reads a random sample of segments and proposes
-    candidate codes. You then review the merged suggestions and approve,
-    edit, merge, or reject individual codes — building the working codebook
-    interactively before full coding begins.
-
-    With --human-leads, you propose codes first from the sample, then
-    optionally see LLM suggestions merged in.
+    candidate codes. A referee model then reviews the merged list for
+    near-duplicates and overlaps before you do the final review.
 
     \b
     Examples:
         polyphony codebook induce                    # sample 20 segments
         polyphony codebook induce --sample-size 50   # larger sample
         polyphony codebook induce --human-leads      # human proposes codes first
+        polyphony codebook induce --skip-referee     # skip dedup pass
     """
     db_path = ctx.obj.get("db_path")
     if not db_path:
@@ -82,6 +81,7 @@ def induce(ctx, sample_size, agent, human_leads):
         skip_agent_b=(agent == "a"),
         human_leads=human_leads,
         supervisor_agent=supervisor,
+        skip_referee=skip_referee,
     )
     conn.close()
 

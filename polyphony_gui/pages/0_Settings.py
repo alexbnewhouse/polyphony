@@ -32,6 +32,185 @@ st.markdown(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Map DB agent_type back to provider names
+_AGENT_TYPE_TO_PROVIDER = {"llm": "ollama", "openai": "openai", "anthropic": "anthropic"}
+_PROVIDER_TO_AGENT_TYPE = {"ollama": "llm", "openai": "openai", "anthropic": "anthropic"}
+
+_PROVIDER_LABELS = {
+    "ollama":    "🖥️  Ollama — local, free, private",
+    "openai":    "☁️  OpenAI — GPT-4o (requires API key)",
+    "anthropic": "☁️  Anthropic — Claude (requires API key)",
+}
+
+
+def _render_current_coder_config():
+    """Show current coder models for the active project and allow changing them."""
+    from polyphony.db import connect, fetchall, fetchone, update
+
+    db_path = st.session_state.get("active_project_db")
+    if not db_path:
+        st.divider()
+        st.info(
+            "No active project. Create or select one on the **📁 Projects** page "
+            "to see and change your coder model configuration here."
+        )
+        return
+
+    from pathlib import Path
+    conn = connect(Path(db_path))
+    project = fetchone(conn, "SELECT * FROM project WHERE id = 1")
+    coders = fetchall(
+        conn,
+        "SELECT * FROM agent WHERE project_id = 1 AND role IN ('coder_a', 'coder_b') ORDER BY role",
+    )
+    conn.close()
+
+    if not project or len(coders) < 2:
+        return
+
+    coder_a = next((c for c in coders if c["role"] == "coder_a"), None)
+    coder_b = next((c for c in coders if c["role"] == "coder_b"), None)
+    if not coder_a or not coder_b:
+        return
+
+    prov_a = _AGENT_TYPE_TO_PROVIDER.get(coder_a["agent_type"], coder_a["agent_type"])
+    prov_b = _AGENT_TYPE_TO_PROVIDER.get(coder_b["agent_type"], coder_b["agent_type"])
+
+    st.divider()
+    st.markdown(f"### 🤖 Current Coder Configuration — {project['name']}")
+    st.markdown(
+        "These are the models currently assigned to your two independent AI coders. "
+        "You can change them below."
+    )
+
+    # Display current config as a clear summary
+    col_cur_a, col_cur_b = st.columns(2)
+    with col_cur_a:
+        with st.container(border=True):
+            st.markdown("**Coder A**")
+            st.markdown(f"**Provider:** {prov_a.title()}")
+            st.markdown(f"**Model:** `{coder_a['model_name']}`")
+            st.markdown(f"**Seed:** {coder_a['seed']}  |  **Temperature:** {coder_a['temperature']:.2f}")
+    with col_cur_b:
+        with st.container(border=True):
+            st.markdown("**Coder B**")
+            st.markdown(f"**Provider:** {prov_b.title()}")
+            st.markdown(f"**Model:** `{coder_b['model_name']}`")
+            st.markdown(f"**Seed:** {coder_b['seed']}  |  **Temperature:** {coder_b['temperature']:.2f}")
+
+    # Change models
+    with st.expander("✏️ Change coder models", expanded=False):
+        st.markdown(
+            "Select new providers and models for each coder. Changes take effect "
+            "for all future coding runs."
+        )
+        change_col_a, change_col_b = st.columns(2)
+
+        with change_col_a:
+            st.markdown("**Coder A**")
+            new_prov_a = st.selectbox(
+                "Provider",
+                options=list(_PROVIDER_LABELS.keys()),
+                format_func=lambda x: _PROVIDER_LABELS[x],
+                index=list(_PROVIDER_LABELS.keys()).index(prov_a) if prov_a in _PROVIDER_LABELS else 0,
+                key="settings_ca_provider",
+            )
+            new_model_a = _model_selector("settings_ca", new_prov_a, coder_a["model_name"])
+
+        with change_col_b:
+            st.markdown("**Coder B**")
+            new_prov_b = st.selectbox(
+                "Provider",
+                options=list(_PROVIDER_LABELS.keys()),
+                format_func=lambda x: _PROVIDER_LABELS[x],
+                index=list(_PROVIDER_LABELS.keys()).index(prov_b) if prov_b in _PROVIDER_LABELS else 0,
+                key="settings_cb_provider",
+            )
+            new_model_b = _model_selector("settings_cb", new_prov_b, coder_b["model_name"])
+
+        if st.button("💾 Update Coder Models", type="primary", key="update_coder_models_btn"):
+            changed = False
+            conn = connect(Path(db_path))
+            if new_prov_a != prov_a or new_model_a != coder_a["model_name"]:
+                update(conn, "agent", {
+                    "agent_type": _PROVIDER_TO_AGENT_TYPE[new_prov_a],
+                    "model_name": new_model_a,
+                }, "id = ?", (coder_a["id"],))
+                changed = True
+            if new_prov_b != prov_b or new_model_b != coder_b["model_name"]:
+                update(conn, "agent", {
+                    "agent_type": _PROVIDER_TO_AGENT_TYPE[new_prov_b],
+                    "model_name": new_model_b,
+                }, "id = ?", (coder_b["id"],))
+                changed = True
+            if changed:
+                conn.commit()
+                conn.close()
+                st.success(
+                    f"✅ Updated!  \n"
+                    f"**Coder A:** {new_model_a} via {new_prov_a.title()}  \n"
+                    f"**Coder B:** {new_model_b} via {new_prov_b.title()}"
+                )
+                st.rerun()
+            else:
+                conn.close()
+                st.info("No changes detected.")
+
+
+def _model_selector(key_prefix: str, provider: str, current_model: str) -> str:
+    """Render a model selector widget for the given provider. Returns selected model name."""
+    if provider == "ollama":
+        installed = list_ollama_models()
+        if installed:
+            options = installed + ["(enter manually)"]
+            default_idx = options.index(current_model) if current_model in options else len(options) - 1
+            sel = st.selectbox(
+                "Model",
+                options=options,
+                index=default_idx,
+                key=f"{key_prefix}_model_sel",
+            )
+            if sel == "(enter manually)":
+                return st.text_input("Model name", value=current_model, key=f"{key_prefix}_model_manual")
+            return sel
+        else:
+            return st.text_input("Model name", value=current_model, key=f"{key_prefix}_model_manual")
+    elif provider == "openai":
+        ids = [m["id"] for m in OPENAI_MODELS]
+        labels = {m["id"]: m["label"] for m in OPENAI_MODELS}
+        options = ids + ["(enter manually)"]
+        default_idx = ids.index(current_model) if current_model in ids else len(options) - 1
+        sel = st.selectbox(
+            "Model",
+            options=options,
+            format_func=lambda x: labels.get(x, x),
+            index=default_idx,
+            key=f"{key_prefix}_model_sel",
+        )
+        if sel == "(enter manually)":
+            return st.text_input("Custom model ID", value=current_model, key=f"{key_prefix}_model_manual")
+        return sel
+    else:  # anthropic
+        ids = [m["id"] for m in ANTHROPIC_MODELS]
+        labels = {m["id"]: m["label"] for m in ANTHROPIC_MODELS}
+        options = ids + ["(enter manually)"]
+        default_idx = ids.index(current_model) if current_model in ids else len(options) - 1
+        sel = st.selectbox(
+            "Model",
+            options=options,
+            format_func=lambda x: labels.get(x, x),
+            index=default_idx,
+            key=f"{key_prefix}_model_sel",
+        )
+        if sel == "(enter manually)":
+            return st.text_input("Custom model ID", value=current_model, key=f"{key_prefix}_model_manual")
+        return sel
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tab layout
 # ─────────────────────────────────────────────────────────────────────────────
 tab_setup, tab_providers, tab_models, tab_options, tab_env = st.tabs([
@@ -191,6 +370,9 @@ with tab_setup:
             st.markdown("#### Quick Start Command")
             st.code(cmd, language="bash")
             st.caption("Or use the **Projects** page to create a project through the GUI.")
+
+    # ── Current project coder configuration (always shown if project active) ──
+    _render_current_coder_config()
 
 # ── Provider Status ───────────────────────────────────────────────────────────
 with tab_providers:

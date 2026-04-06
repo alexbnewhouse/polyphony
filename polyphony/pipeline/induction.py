@@ -193,6 +193,189 @@ def merge_candidates(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Referee deduplication
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _format_candidates_for_referee(candidates: List[dict]) -> str:
+    """Format candidate codes as a numbered list for the referee prompt."""
+    parts = []
+    for i, code in enumerate(candidates, 1):
+        lines = [f"{i}. **{code.get('name', 'UNNAMED')}**"]
+        if code.get("description"):
+            lines.append(f"   Description: {code['description']}")
+        if code.get("inclusion_criteria"):
+            lines.append(f"   Include when: {code['inclusion_criteria']}")
+        if code.get("exclusion_criteria"):
+            lines.append(f"   Exclude when: {code['exclusion_criteria']}")
+        quotes = code.get("example_quotes", [])
+        if quotes:
+            lines.append(f"   Examples: {'; '.join(str(q) for q in quotes[:2])}")
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
+
+
+def referee_dedup_candidates(
+    agent,
+    candidates: List[dict],
+    project: dict,
+    conn: sqlite3.Connection,
+) -> List[dict]:
+    """
+    Run a referee/deduplication pass on merged candidate codes.
+
+    Uses a third model (or one of the existing coders) to identify
+    near-duplicate, overlapping, or redundant codes and annotate each
+    candidate with:
+      - _referee_verdict: "keep", "merge", or "discard"
+      - _referee_confidence: 0.0-1.0
+      - _referee_reason: explanation
+      - _referee_merge_into: primary code name (for merges)
+      - _referee_merged_name: suggested merged name
+      - _referee_merged_description: combined description
+
+    Returns the candidates list with referee annotations added.
+    """
+    tmpl = prompt_lib["codebook_referee"]
+
+    research_questions = json.loads(project.get("research_questions") or "[]")
+    rq_text = "\n".join(f"  - {q}" for q in research_questions) or "  (not specified)"
+
+    candidate_text = _format_candidates_for_referee(candidates)
+
+    system, user = tmpl.render(
+        methodology=project["methodology"],
+        research_questions=rq_text,
+        n_codes=len(candidates),
+        candidate_codes_formatted=candidate_text,
+    )
+
+    console.print(f"  [dim]Running referee dedup with {agent.info}...[/]")
+
+    # Create a coding_run record for auditability
+    from ..db import fetchone as db_fetchone, insert as db_insert
+    cb = db_fetchone(
+        conn,
+        "SELECT id FROM codebook_version WHERE project_id = ? ORDER BY version DESC LIMIT 1",
+        (project["id"],),
+    )
+    cb_id = cb["id"] if cb else None
+    if cb_id is None:
+        cb_id = db_insert(conn, "codebook_version", {
+            "project_id": project["id"],
+            "version": 0,
+            "stage": "draft",
+            "rationale": "Placeholder for referee run",
+        })
+        conn.commit()
+
+    run_id = db_insert(conn, "coding_run", {
+        "project_id": project["id"],
+        "codebook_version_id": cb_id,
+        "agent_id": agent.agent_id,
+        "run_type": "referee",
+        "status": "running",
+        "started_at": None,
+        "segment_count": 0,
+    })
+    conn.commit()
+
+    raw, parsed, call_id = agent.call("referee", system, user)
+
+    conn.execute(
+        "UPDATE coding_run SET status = 'complete', completed_at = datetime('now') WHERE id = ?",
+        (run_id,),
+    )
+    conn.commit()
+
+    # Apply referee annotations to candidates
+    reviews = parsed.get("reviews", [])
+    review_map = {}
+    for r in reviews:
+        key = r.get("code_name", "").strip().upper().replace(" ", "_").replace("-", "_")
+        review_map[key] = r
+
+    duplicate_groups = parsed.get("duplicate_groups", [])
+
+    for code in candidates:
+        key = code.get("name", "").strip().upper().replace(" ", "_").replace("-", "_")
+        review = review_map.get(key, {})
+        code["_referee_verdict"] = review.get("verdict", "keep")
+        code["_referee_confidence"] = review.get("confidence", 0.5)
+        code["_referee_reason"] = review.get("reason", "")
+        code["_referee_merge_into"] = review.get("merge_into")
+        code["_referee_merged_name"] = review.get("merged_name")
+        code["_referee_merged_description"] = review.get("merged_description")
+
+    return candidates, duplicate_groups, parsed.get("summary", "")
+
+
+def apply_referee_recommendations(
+    candidates: List[dict],
+    duplicate_groups: List[dict],
+    auto_apply: bool = False,
+) -> List[dict]:
+    """
+    Apply referee recommendations to produce a deduplicated candidate list.
+
+    If auto_apply=True, automatically merges/discards as recommended.
+    Otherwise, just sorts candidates so that "keep" codes come first,
+    then "merge", then "discard" — leaving the final decision to the human.
+
+    Returns the processed candidate list (with referee metadata intact).
+    """
+    if not auto_apply:
+        # Sort: keep first, merge second, discard last
+        verdict_order = {"keep": 0, "merge": 1, "discard": 2}
+        candidates.sort(
+            key=lambda c: (
+                verdict_order.get(c.get("_referee_verdict", "keep"), 3),
+                -c.get("_referee_confidence", 0.5),
+            )
+        )
+        return candidates
+
+    # Auto-apply: merge groups and discard redundant codes
+    # Build a set of codes that are being merged away
+    merged_away = set()
+    merge_replacements = {}  # code_name -> replacement dict
+
+    for group in duplicate_groups:
+        codes_in_group = [c.upper().replace(" ", "_").replace("-", "_") for c in group.get("codes", [])]
+        recommended_name = group.get("recommended_name", codes_in_group[0] if codes_in_group else "")
+        recommended_desc = group.get("recommended_description", "")
+
+        # The first code in the group becomes the primary
+        for code_name in codes_in_group[1:]:
+            merged_away.add(code_name)
+        if codes_in_group:
+            merge_replacements[codes_in_group[0]] = {
+                "name": recommended_name,
+                "description": recommended_desc,
+            }
+
+    result = []
+    for code in candidates:
+        key = code.get("name", "").strip().upper().replace(" ", "_").replace("-", "_")
+        verdict = code.get("_referee_verdict", "keep")
+
+        if verdict == "discard" or key in merged_away:
+            continue
+
+        # Apply merge name/description if this is a primary in a merge group
+        if key in merge_replacements:
+            replacement = merge_replacements[key]
+            if replacement.get("name"):
+                code["name"] = replacement["name"]
+            if replacement.get("description"):
+                code["description"] = replacement["description"]
+
+        result.append(code)
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Human review
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -222,17 +405,42 @@ def human_review_candidates(candidates: List[dict], auto_accept_all: bool = Fals
     i = 0
     while i < len(candidates):
         code = candidates[i]
+        # Show referee recommendation if available
+        verdict = code.get("_referee_verdict")
+        confidence = code.get("_referee_confidence")
+        reason = code.get("_referee_reason", "")
+
+        verdict_display = ""
+        if verdict:
+            verdict_colors = {"keep": "green", "merge": "yellow", "discard": "red"}
+            color = verdict_colors.get(verdict, "dim")
+            conf_pct = f"{confidence * 100:.0f}%" if confidence is not None else "?"
+            verdict_display = f"  [{color}]Referee: {verdict.upper()} ({conf_pct} confidence)[/{color}]"
+            if reason:
+                verdict_display += f"\n  [dim]{reason}[/]"
+            if verdict == "merge" and code.get("_referee_merge_into"):
+                verdict_display += f"\n  [yellow]→ Merge into: {code['_referee_merge_into']}[/]"
+                if code.get("_referee_merged_name"):
+                    verdict_display += f" as [bold]{code['_referee_merged_name']}[/]"
+
         console.rule(f"Code {i + 1}/{len(candidates)}: [bold]{code['name']}[/]")
+        if verdict_display:
+            console.print(verdict_display)
         console.print(f"Description: {code.get('description', '(none)')}")
         if code.get("inclusion_criteria"):
             console.print(f"Include if:  {code['inclusion_criteria']}")
         if code.get("exclusion_criteria"):
             console.print(f"Exclude if:  {code['exclusion_criteria']}")
 
+        # Default action based on referee verdict
+        default_action = "a"
+        if verdict == "discard":
+            default_action = "r"
+
         choice = Prompt.ask(
             "Action",
             choices=["a", "r", "e", "n", "s"],
-            default="a",
+            default=default_action,
         ).lower()
 
         if choice == "s":
@@ -347,6 +555,8 @@ def run_induction(
     human_leads: bool = False,
     supervisor_agent=None,
     auto_accept_all: bool = False,
+    referee_agent=None,
+    skip_referee: bool = False,
 ) -> int:
     """
     Full codebook induction pipeline. Returns new codebook_version_id.
@@ -357,8 +567,13 @@ def run_induction(
       3. Agent A induces candidate codes
       4. Agent B induces candidate codes (optional)
       5. Merge candidates
-      6. Human reviews
-      7. Save to DB
+      6. (Optional) Referee deduplication pass
+      7. Human reviews
+      8. Save to DB
+
+    referee_agent: an agent to use for the dedup/referee pass. If None and
+        skip_referee is False, uses agent_b (or agent_a if agent_b was skipped).
+    skip_referee: if True, skip the referee dedup pass entirely.
     """
     project_id = project["id"]
 
@@ -367,8 +582,16 @@ def run_induction(
     # Step 1: Sample
     console.print(f"Selecting {sample_size} segments for induction...")
     segments = select_induction_sample(conn, project_id, n=sample_size, seed=sample_seed)
-    console.print(f"  Sampled {len(segments)} segments from "
-                  f"{len(set(s['document_id'] for s in segments))} documents.")
+    n_docs_sampled = len(set(s['document_id'] for s in segments))
+    if len(segments) < sample_size:
+        console.print(
+            f"  [yellow]Sampled {len(segments)} segments from {n_docs_sampled} document(s) "
+            f"(requested {sample_size}, but only {len(segments)} available in corpus).[/]"
+        )
+    else:
+        console.print(
+            f"  Sampled {len(segments)} segments from {n_docs_sampled} document(s)."
+        )
 
     # Step 2 (optional): Human-led induction
     candidates_human = []
@@ -427,7 +650,46 @@ def run_induction(
     all_candidates = merge_candidates(*all_candidate_lists)
     console.print(f"\nMerged to {len(all_candidates)} unique candidate codes.")
 
-    # Step 5: Human review
+    # Step 6 (optional): Referee deduplication pass
+    if not skip_referee and len(all_candidates) > 1:
+        ref_agent = referee_agent or (agent_b if not skip_agent_b else agent_a)
+        console.print(f"\n[bold cyan]Running referee dedup pass...[/]")
+        try:
+            all_candidates, dup_groups, referee_summary = referee_dedup_candidates(
+                ref_agent, all_candidates, project, conn,
+            )
+            # Display referee summary
+            keep_count = sum(1 for c in all_candidates if c.get("_referee_verdict") == "keep")
+            merge_count = sum(1 for c in all_candidates if c.get("_referee_verdict") == "merge")
+            discard_count = sum(1 for c in all_candidates if c.get("_referee_verdict") == "discard")
+
+            console.print()
+            ref_table = Table(title="🔍 Referee Deduplication Results", border_style="magenta")
+            ref_table.add_column("Verdict", style="bold")
+            ref_table.add_column("Count")
+            ref_table.add_row("[green]Keep[/]", str(keep_count))
+            ref_table.add_row("[yellow]Merge[/]", str(merge_count))
+            ref_table.add_row("[red]Discard[/]", str(discard_count))
+            console.print(ref_table)
+
+            if dup_groups:
+                console.print("\n[bold]Duplicate groups identified:[/]")
+                for g in dup_groups:
+                    codes_str = ", ".join(g.get("codes", []))
+                    rec = g.get("recommended_name", "?")
+                    console.print(f"  [yellow]→[/] {codes_str}  ⟶  [green]{rec}[/]")
+
+            if referee_summary:
+                console.print(f"\n  [dim]Referee: {referee_summary}[/]")
+
+            # Sort candidates: keep first, then merge, then discard
+            all_candidates = apply_referee_recommendations(all_candidates, dup_groups, auto_apply=False)
+
+        except Exception as e:
+            console.print(f"\n  [yellow]⚠ Referee pass failed: {e}[/]")
+            console.print("  [dim]Continuing with unreviewed candidates.[/]")
+
+    # Step 7: Human review
     approved = human_review_candidates(all_candidates, auto_accept_all=auto_accept_all)
     if not approved:
         raise ValueError("No codes were approved during induction.")

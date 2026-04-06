@@ -10,9 +10,14 @@ import click
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 console = Console()
+
+
+# Map DB agent_type back to CLI provider names
+_AGENT_TYPE_TO_PROVIDER = {"llm": "ollama", "openai": "openai", "anthropic": "anthropic"}
 
 
 @click.command()
@@ -22,7 +27,8 @@ console = Console()
     default=False,
     help="Output hardware profile and recommendations as JSON (for scripting).",
 )
-def setup(json_output: bool) -> None:
+@click.pass_context
+def setup(ctx, json_output: bool) -> None:
     """Detect your hardware and get LLM setup recommendations.
 
     Scans your system for RAM, GPU, and Ollama status, then recommends
@@ -271,3 +277,139 @@ def setup(json_output: bool) -> None:
                 title="[bold green]Ready to go![/]",
                 border_style="green",
             ))
+
+    # ── Current project coder configuration ──────────────────────────
+    _show_current_coders(ctx, result)
+
+
+def _show_current_coders(ctx: click.Context, result) -> None:
+    """Display current coder models for the active project, with option to change."""
+    from polyphony.db import connect, fetchall, fetchone, find_project_db, update
+
+    # Resolve active project
+    db_path = ctx.obj.get("db_path") if ctx.obj else None
+    if not db_path:
+        try:
+            db_path = find_project_db()
+        except FileNotFoundError:
+            db_path = None
+
+    if not db_path or not db_path.exists():
+        console.print()
+        console.print("[dim]No active project. Create one with:[/]")
+        console.print("  [bold]polyphony project new --name \"My Study\"[/]")
+        return
+
+    conn = connect(db_path)
+    project = fetchone(conn, "SELECT * FROM project WHERE id = 1")
+    coders = fetchall(
+        conn,
+        "SELECT * FROM agent WHERE project_id = 1 AND role IN ('coder_a', 'coder_b') ORDER BY role",
+    )
+    if not project or len(coders) < 2:
+        conn.close()
+        return
+
+    coder_a = next((c for c in coders if c["role"] == "coder_a"), None)
+    coder_b = next((c for c in coders if c["role"] == "coder_b"), None)
+    if not coder_a or not coder_b:
+        conn.close()
+        return
+
+    prov_a = _AGENT_TYPE_TO_PROVIDER.get(coder_a["agent_type"], coder_a["agent_type"]) or "ollama"
+    prov_b = _AGENT_TYPE_TO_PROVIDER.get(coder_b["agent_type"], coder_b["agent_type"]) or "ollama"
+
+    console.print()
+    coder_table = Table(
+        title=f"🤖 Current Coder Configuration — [cyan]{project['name']}[/]",
+        border_style="cyan",
+    )
+    coder_table.add_column("", style="bold")
+    coder_table.add_column("Coder A", style="green")
+    coder_table.add_column("Coder B", style="yellow")
+
+    coder_table.add_row("Provider", prov_a.title(), prov_b.title())
+    coder_table.add_row("Model", coder_a["model_name"], coder_b["model_name"])
+    coder_table.add_row("Seed", str(coder_a["seed"]), str(coder_b["seed"]))
+    coder_table.add_row("Temperature", f"{coder_a['temperature']:.2f}", f"{coder_b['temperature']:.2f}")
+
+    console.print(coder_table)
+
+    # Offer to change
+    if not Confirm.ask("\n  Would you like to change the coder models?", default=False):
+        conn.close()
+        return
+
+    _PROVIDER_TO_AGENT_TYPE = {"ollama": "llm", "openai": "openai", "anthropic": "anthropic"}
+    valid_providers = list(_PROVIDER_TO_AGENT_TYPE.keys())
+
+    # Build model suggestions from recommendations
+    model_hints = {}
+    for r in result.recommendations:
+        model_hints.setdefault(r.provider, []).append(r.model_name)
+
+    def _prompt_coder(label: str, current_provider: str, current_model: str) -> tuple[str, str]:
+        console.print(f"\n  [bold]{label}[/]  (current: [cyan]{current_model}[/] via [cyan]{current_provider}[/])")
+
+        # Provider
+        provider_choices = ", ".join(valid_providers)
+        new_provider = Prompt.ask(
+            f"    Provider ({provider_choices})",
+            default=current_provider,
+        ).strip().lower()
+        if new_provider not in valid_providers:
+            console.print(f"    [yellow]Invalid provider '{new_provider}', keeping '{current_provider}'[/]")
+            new_provider = current_provider
+
+        # Model suggestions for selected provider
+        hints = model_hints.get(new_provider, [])
+        if hints:
+            console.print(f"    [dim]Suggested models: {', '.join(hints)}[/]")
+
+        new_model = Prompt.ask(
+            "    Model name",
+            default=current_model if new_provider == current_provider else (hints[0] if hints else current_model),
+        ).strip()
+
+        return new_provider, new_model
+
+    new_prov_a, new_model_a = _prompt_coder("Coder A", prov_a, coder_a["model_name"])
+    new_prov_b, new_model_b = _prompt_coder("Coder B", prov_b, coder_b["model_name"])
+
+    # Check if anything changed
+    changed_a = new_prov_a != prov_a or new_model_a != coder_a["model_name"]
+    changed_b = new_prov_b != prov_b or new_model_b != coder_b["model_name"]
+
+    if not changed_a and not changed_b:
+        console.print("\n  [dim]No changes made.[/]")
+        conn.close()
+        return
+
+    # Apply updates
+    if changed_a:
+        update(conn, "agent", {
+            "agent_type": _PROVIDER_TO_AGENT_TYPE[new_prov_a],
+            "model_name": new_model_a,
+        }, "id = ?", (coder_a["id"],))
+
+    if changed_b:
+        update(conn, "agent", {
+            "agent_type": _PROVIDER_TO_AGENT_TYPE[new_prov_b],
+            "model_name": new_model_b,
+        }, "id = ?", (coder_b["id"],))
+
+    conn.commit()
+    conn.close()
+
+    # Show summary
+    console.print()
+    summary_parts = []
+    if changed_a:
+        summary_parts.append(f"  Coder A: [green]{new_model_a}[/] via [green]{new_prov_a}[/]")
+    if changed_b:
+        summary_parts.append(f"  Coder B: [green]{new_model_b}[/] via [green]{new_prov_b}[/]")
+    console.print(Panel(
+        "[bold]Updated coder configuration:[/]\n\n" + "\n".join(summary_parts),
+        title="[bold green]✓ Models Updated[/]",
+        border_style="green",
+    ))

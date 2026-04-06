@@ -341,6 +341,14 @@ def get_segments_preview(db_path: str | Path, project_id: int, limit: int = 20) 
     return rows
 
 
+def get_segment_count(db_path: str | Path, project_id: int) -> int:
+    """Return total number of segments for a project."""
+    conn = connect(Path(db_path))
+    row = fetchone(conn, "SELECT COUNT(*) AS n FROM segment WHERE project_id = ?", (project_id,))
+    conn.close()
+    return row["n"] if row else 0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Coding run helpers
 # ─────────────────────────────────────────────────────────────────────────────

@@ -113,6 +113,10 @@ with st.form("calibration_form"):
         value=False,
         help="If unchecked, uses the previously marked calibration set (if any).",
     )
+    use_batch = st.checkbox(
+        "Batch segments (faster — groups segments per LLM call using context window)",
+        value=False,
+    )
     run_btn = st.form_submit_button("Run Calibration", type="primary")
 
 if run_btn:
@@ -153,6 +157,7 @@ if run_btn:
             agent=agent_a,
             codebook_version_id=cb["id"],
             run_type="calibration",
+            batch=use_batch,
         )
         progress.progress(50, text="Coder B coding calibration set…")
     except Exception as e:
@@ -167,6 +172,7 @@ if run_btn:
             agent=agent_b,
             codebook_version_id=cb["id"],
             run_type="calibration",
+            batch=use_batch,
         )
         progress.progress(90, text="Computing agreement…")
     except Exception as e:

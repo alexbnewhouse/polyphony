@@ -235,6 +235,7 @@ def run_calibration(
     max_rounds: int = 5,
     include_supervisor: bool = False,
     supervisor_agent=None,
+    batch: bool = False,
 ) -> dict:
     """
     Run calibration round(s) until IRR threshold is met or max_rounds reached.
@@ -263,10 +264,12 @@ def run_calibration(
         run_id_a = run_coding_session(
             conn, project, agent_a, codebook_version_id,
             run_type="calibration",
+            batch=batch,
         )
         run_id_b = run_coding_session(
             conn, project, agent_b, codebook_version_id,
             run_type="calibration",
+            batch=batch,
         )
 
         # Optionally run supervisor as third coder
@@ -276,6 +279,7 @@ def run_calibration(
             run_id_c = run_coding_session(
                 conn, project, supervisor_agent, codebook_version_id,
                 run_type="calibration",
+                batch=batch,
             )
 
         # Compute IRR

@@ -421,6 +421,11 @@ hardware, and segment length.
   (e.g., `llama3.2:3b`), then switch to a larger model for independent coding.
 - **Batch by document.** For very large corpora, import and code in batches
   to manage memory and allow incremental review.
+- **Use `--batch` for faster coding.** The `--batch` flag groups multiple
+  segments into each LLM call, automatically sizing batches to fit the model's
+  context window. This can dramatically reduce the number of API calls while
+  preserving independent per-segment coding. Image segments are always coded
+  individually.
 - **Monitor with `polyphony code status`.** Track coding progress per agent
   and estimate remaining time from completed segments.
 - **Use `--resume` for interrupted runs.** If a coding session is interrupted

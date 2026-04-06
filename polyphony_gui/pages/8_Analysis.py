@@ -138,9 +138,12 @@ with tab_saturation:
         sat = check_saturation(conn, project_id)
         conn.close()
 
-        if sat and sat.get("windows"):
-            windows = sat["windows"]
-            df_sat = pd.DataFrame(windows)
+        windows_data = sat.get("new_codes_per_window", [])
+        if sat and windows_data:
+            df_sat = pd.DataFrame([
+                {"window_index": i + 1, "new_codes": n}
+                for i, n in enumerate(windows_data)
+            ])
 
             import plotly.express as px
             fig = px.line(
@@ -162,12 +165,14 @@ with tab_saturation:
             else:
                 st.warning("Saturation not yet reached — new codes are still emerging.")
 
-            st.metric("Total unique codes observed", sat.get("total_codes", "—"))
+            st.metric("Total unique codes observed", sat.get("total_unique_codes", "—"))
         else:
-            conn.close()
             st.info("Not enough coding data for saturation analysis.")
     except Exception as e:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
         st.error(safe_error_message(e, "Saturation analysis"))
 
 # ── Co-occurrence ─────────────────────────────────────────────────────────────
@@ -186,15 +191,20 @@ with tab_cooccurrence:
         matrix = co_occurrence_matrix(conn, project_id)
         conn.close()
 
-        if matrix and matrix.get("codes"):
-            codes_list = matrix["codes"]
-            data = matrix["matrix"]
+        if matrix:
+            # matrix is a nested dict: {code_a: {code_b: count}}
+            codes_list = sorted(matrix.keys())
 
             if len(codes_list) > 1:
                 import plotly.graph_objects as go
                 import numpy as np
 
-                np_matrix = np.array(data)
+                # Build a symmetric matrix from the nested dict
+                np_matrix = np.zeros((len(codes_list), len(codes_list)), dtype=int)
+                for i, ca in enumerate(codes_list):
+                    for j, cb in enumerate(codes_list):
+                        if ca in matrix and cb in matrix[ca]:
+                            np_matrix[i][j] = matrix[ca][cb]
 
                 fig = go.Figure(data=go.Heatmap(
                     z=np_matrix,
@@ -213,10 +223,12 @@ with tab_cooccurrence:
             else:
                 st.info("Not enough codes for a co-occurrence matrix.")
         else:
-            conn.close()
             st.info("No coding data available for co-occurrence analysis.")
     except Exception as e:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
         st.error(safe_error_message(e, "Co-occurrence analysis"))
 
 # ── Theme synthesis ───────────────────────────────────────────────────────────

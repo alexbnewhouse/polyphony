@@ -43,8 +43,10 @@ def code():
               help="Random seed for human sample selection")
 @click.option("--deductive", is_flag=True, default=False,
               help="Use deductive (theory-driven) coding prompt instead of open coding")
+@click.option("--batch", is_flag=True, default=False,
+              help="Batch multiple segments per LLM call (faster, uses context window)")
 @click.pass_context
-def run(ctx, agent, resume, calibration_only, sample_size, sample_seed, deductive):
+def run(ctx, agent, resume, calibration_only, sample_size, sample_seed, deductive, batch):
     """
     Run independent coding: each agent codes every segment using the codebook.
 
@@ -57,6 +59,7 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed, deductiv
         polyphony code run --agent all            # A + B + supervisor
         polyphony code run --agent all --sample-size 50  # Human codes 50, LLMs code all
         polyphony code run --resume               # Continue an interrupted run
+        polyphony code run --batch                # Batch segments for fewer LLM calls
     """
     db_path = ctx.obj.get("db_path")
     if not db_path:
@@ -97,6 +100,7 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed, deductiv
             codebook_version_id=cb["id"],
             run_type=run_type, resume=resume,
             prompt_key=prompt_key,
+            batch=batch,
         )
 
     if agent in ("b", "both", "all"):
@@ -105,6 +109,7 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed, deductiv
             codebook_version_id=cb["id"],
             run_type=run_type, resume=resume,
             prompt_key=prompt_key,
+            batch=batch,
         )
 
     if agent in ("supervisor", "all"):
@@ -141,6 +146,7 @@ def run(ctx, agent, resume, calibration_only, sample_size, sample_seed, deductiv
             run_type=run_type, resume=resume,
             segments=sup_segments,
             prompt_key=prompt_key,
+            batch=batch,
         )
 
     if not calibration_only:

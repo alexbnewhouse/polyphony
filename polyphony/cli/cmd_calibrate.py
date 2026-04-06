@@ -39,8 +39,10 @@ def calibrate():
               help="Re-select a new calibration set (clears the existing one)")
 @click.option("--include-supervisor", is_flag=True, default=False,
               help="Include the supervisor as a third coder for 3-way calibration")
+@click.option("--batch", is_flag=True, default=False,
+              help="Batch multiple segments per LLM call (faster, uses context window)")
 @click.pass_context
-def run(ctx, sample_size, threshold, max_rounds, reset, include_supervisor):
+def run(ctx, sample_size, threshold, max_rounds, reset, include_supervisor, batch):
     """
     Run calibration: both agents code the same segment sample, then you
     review disagreements and optionally refine the codebook.
@@ -99,6 +101,7 @@ def run(ctx, sample_size, threshold, max_rounds, reset, include_supervisor):
         max_rounds=max_rounds,
         include_supervisor=include_supervisor,
         supervisor_agent=supervisor,
+        batch=batch,
     )
     conn.close()
 

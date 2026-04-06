@@ -136,24 +136,45 @@ with tab_induce:
         "suggest codes. You then review, edit, and approve them."
     )
 
-    from polyphony_gui.db import get_documents
+    from polyphony_gui.db import get_documents, get_segment_count
     docs = get_documents(db_path, project_id)
     if not docs:
         st.warning("Please import documents first (go to **Import Data**).")
         st.stop()
 
+    total_segments = get_segment_count(db_path, project_id)
+    if total_segments == 0:
+        st.warning("No segments found. Import and segment your documents first.")
+        st.stop()
+
+    st.caption(f"Your corpus has **{total_segments}** segments across **{len(docs)}** documents.")
+
     with st.form("induction_form"):
-        sample_size = st.slider(
-            "Sample size",
-            min_value=5,
-            max_value=50,
-            value=20,
-            help="Number of segments the AI will analyze to suggest codes. "
-                 "Larger sample = more thorough, but slower.",
-        )
+        slider_max = min(50, total_segments)
+        slider_min = min(5, total_segments)
+        slider_default = min(20, total_segments)
+        if slider_min >= slider_max:
+            # Not enough segments for a range — use a fixed value
+            st.info(f"Your corpus has only {total_segments} segment(s). All will be used for induction.")
+            sample_size = total_segments
+        else:
+            sample_size = st.slider(
+                "Sample size",
+                min_value=slider_min,
+                max_value=slider_max,
+                value=slider_default,
+                help=f"Number of segments the AI will analyze to suggest codes. "
+                     f"Your corpus has {total_segments} total segments.",
+            )
         skip_coder_b = st.checkbox(
             "Use only one AI coder for induction (faster)",
             value=False,
+        )
+        run_referee = st.checkbox(
+            "Run referee deduplication pass (recommended)",
+            value=True,
+            help="A third model reviews the merged codes for near-duplicates and "
+                 "overlaps, flagging which to keep, merge, or discard.",
         )
         run_btn = st.form_submit_button("Generate Code Suggestions", type="primary")
 
@@ -172,7 +193,14 @@ with tab_induce:
 
         with st.spinner("Sampling segments…"):
             segments = select_induction_sample(conn, project_id, n=sample_size, seed=42)
-            st.write(f"Sampled **{len(segments)}** segments from {len({s['document_id'] for s in segments})} documents.")
+            n_docs_sampled = len({s['document_id'] for s in segments})
+            if len(segments) < sample_size:
+                st.info(
+                    f"Sampled **{len(segments)}** segments from {n_docs_sampled} document(s) "
+                    f"(requested {sample_size}, but only {len(segments)} available in corpus)."
+                )
+            else:
+                st.write(f"Sampled **{len(segments)}** segments from {n_docs_sampled} document(s).")
 
         # Create placeholder codebook for induction run
         cb_existing = db_fetchone(
@@ -230,26 +258,110 @@ with tab_induce:
                 except Exception as e:
                     st.warning(safe_error_message(e, "Coder B induction"))
 
+        merged = merge_candidates(candidates_a, candidates_b) if candidates_b else candidates_a
+        st.success(f"Generated **{len(merged)}** unique candidate codes.")
+
+        # Referee deduplication pass
+        referee_summary = ""
+        dup_groups = []
+        if run_referee and len(merged) > 1:
+            from polyphony.pipeline.induction import referee_dedup_candidates, apply_referee_recommendations
+            ref_agent = agent_b if not skip_coder_b else agent_a
+            with st.spinner(f"Referee ({ref_agent.info}) is reviewing codes for duplicates…"):
+                try:
+                    merged, dup_groups, referee_summary = referee_dedup_candidates(
+                        ref_agent, merged, project_row, conn,
+                    )
+                    merged = apply_referee_recommendations(merged, dup_groups, auto_apply=False)
+                except Exception as e:
+                    st.warning(f"Referee pass failed: {safe_error_message(e, 'Referee')}. Continuing without dedup.")
+
         conn.close()
 
-        merged = merge_candidates(candidates_a, candidates_b) if candidates_b else candidates_a
         st.session_state["induction_candidates"] = merged
-        st.success(f"Generated **{len(merged)}** unique candidate codes. Review them below.")
+        st.session_state["induction_dup_groups"] = dup_groups
+        st.session_state["induction_referee_summary"] = referee_summary
 
     # Review candidates
     if "induction_candidates" in st.session_state and st.session_state["induction_candidates"]:
         candidates = st.session_state["induction_candidates"]
+        dup_groups = st.session_state.get("induction_dup_groups", [])
+        referee_summary = st.session_state.get("induction_referee_summary", "")
+
         st.divider()
+
+        # Show referee summary if available
+        has_referee = any(c.get("_referee_verdict") for c in candidates)
+        if has_referee:
+            st.markdown("### 🔍 Referee Deduplication Results")
+            keep_count = sum(1 for c in candidates if c.get("_referee_verdict") == "keep")
+            merge_count = sum(1 for c in candidates if c.get("_referee_verdict") == "merge")
+            discard_count = sum(1 for c in candidates if c.get("_referee_verdict") == "discard")
+
+            col_k, col_m, col_d = st.columns(3)
+            col_k.metric("✅ Keep", keep_count)
+            col_m.metric("🔀 Merge", merge_count)
+            col_d.metric("❌ Discard", discard_count)
+
+            if dup_groups:
+                st.markdown("**Near-duplicate groups identified:**")
+                for g in dup_groups:
+                    codes_str = ", ".join(f"`{c}`" for c in g.get("codes", []))
+                    rec = g.get("recommended_name", "?")
+                    st.markdown(f"- {codes_str} → **{rec}**")
+
+            if referee_summary:
+                st.caption(f"Referee summary: {referee_summary}")
+
+            st.divider()
+
         st.markdown("### Review AI-Suggested Codes")
         st.markdown(
             "Edit any code name or description, then uncheck codes you don't want. "
             "Click **Save Codebook** when you're satisfied."
         )
+        if has_referee:
+            st.caption(
+                "Codes are sorted by referee recommendation: ✅ Keep first, "
+                "🔀 Merge second, ❌ Discard last. Pre-checked based on verdict."
+            )
 
         reviewed = []
         for i, code in enumerate(candidates):
-            with st.expander(f"**{code.get('name', f'Code {i+1}')}**", expanded=False):
-                keep = st.checkbox("Include this code", value=True, key=f"keep_{i}")
+            verdict = code.get("_referee_verdict", "")
+            confidence = code.get("_referee_confidence")
+            reason = code.get("_referee_reason", "")
+
+            # Build expander label with referee badge
+            badge = ""
+            if verdict == "keep":
+                badge = "✅ "
+            elif verdict == "merge":
+                badge = "🔀 "
+            elif verdict == "discard":
+                badge = "❌ "
+
+            default_keep = verdict != "discard" if verdict else True
+
+            with st.expander(f"{badge}**{code.get('name', f'Code {i+1}')}**", expanded=False):
+                # Show referee recommendation if available
+                if verdict:
+                    conf_pct = f"{confidence * 100:.0f}%" if confidence is not None else "?"
+                    if verdict == "keep":
+                        st.success(f"Referee: **Keep** ({conf_pct} confidence) — {reason}")
+                    elif verdict == "merge":
+                        merge_target = code.get("_referee_merge_into", "?")
+                        merged_name = code.get("_referee_merged_name", "")
+                        msg = f"Referee: **Merge** ({conf_pct} confidence) — {reason}"
+                        if merge_target:
+                            msg += f"  \nSuggested merge with `{merge_target}`"
+                        if merged_name:
+                            msg += f" → `{merged_name}`"
+                        st.warning(msg)
+                    elif verdict == "discard":
+                        st.error(f"Referee: **Discard** ({conf_pct} confidence) — {reason}")
+
+                keep = st.checkbox("Include this code", value=default_keep, key=f"keep_{i}")
                 col1, col2 = st.columns(2)
                 with col1:
                     name_val = st.text_input("Name", value=code.get("name", ""), key=f"name_{i}")
@@ -282,16 +394,52 @@ with tab_induce:
                 cb_id = save_codebook_from_candidates(db_path, project_id, approved)
                 update_project_status(db_path, project_id, "inducing")
                 del st.session_state["induction_candidates"]
+                st.session_state.pop("induction_dup_groups", None)
+                st.session_state.pop("induction_referee_summary", None)
                 st.success(f"Saved codebook with **{len(approved)}** codes. Proceed to **Calibrate**.")
                 st.rerun()
 
 # ── Manual code entry ─────────────────────────────────────────────────────────
 with tab_manual:
     st.markdown("### Add a Code Manually")
+    st.markdown(
+        "Review sample segments from your data below, then define codes based "
+        "on what you observe."
+    )
 
     if not cb:
         st.info("No codebook yet. You can start one by adding codes here.")
 
+    # ── Segment preview panel ─────────────────────────────────────────────
+    from polyphony_gui.db import get_segment_count, get_segments_preview
+    total_segs_manual = get_segment_count(db_path, project_id)
+    if total_segs_manual > 0:
+        with st.expander(f"📄 Browse segments ({total_segs_manual} total)", expanded=False):
+            if total_segs_manual <= 5:
+                preview_n = total_segs_manual
+            else:
+                preview_n = st.slider(
+                    "Number of segments to show",
+                    min_value=5,
+                    max_value=min(100, total_segs_manual),
+                    value=min(20, total_segs_manual),
+                    key="manual_seg_preview_n",
+                )
+            seg_rows = get_segments_preview(db_path, project_id, limit=preview_n)
+            for seg in seg_rows:
+                source = seg.get("filename", f"Doc {seg['document_id']}")
+                idx = seg.get("segment_index", "?")
+                text = seg.get("text", "")
+                if seg.get("media_type") == "image":
+                    st.markdown(f"**[{source} — Segment {idx}]** *(image)*")
+                else:
+                    with st.container(border=True):
+                        st.caption(f"{source} — Segment {idx}")
+                        st.markdown(text[:500] + ("…" if len(text) > 500 else ""))
+    else:
+        st.warning("No segments found. Import and segment your documents first.")
+
+    st.divider()
     with st.form("add_code_form"):
         code_name = st.text_input("Code name *", placeholder="e.g. HOUSING_INSECURITY")
         code_desc = st.text_area("Description", placeholder="What does this code capture?", height=80)

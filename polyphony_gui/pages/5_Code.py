@@ -121,6 +121,13 @@ with st.form("coding_form"):
         "Resume interrupted run (skip already-coded segments)",
         value=False,
     )
+    use_batch = st.checkbox(
+        "Batch segments (faster — groups segments per LLM call using context window)",
+        value=False,
+        help="When enabled, multiple segments are sent in a single prompt. "
+             "Reduces total LLM calls and can be significantly faster for large corpora. "
+             "Disable for maximum per-segment accuracy with a fresh context per segment.",
+    )
     run_btn = st.form_submit_button("Start Coding", type="primary")
 
 if run_btn:
@@ -182,6 +189,7 @@ if run_btn:
                 run_type="independent",
                 resume=resume,
                 prompt_key=prompt_key,
+                batch=use_batch,
             )
             completed_runs.append(("Coder A", run_id_a))
             progress_a.progress(100, text="Coder A done!")
@@ -202,6 +210,7 @@ if run_btn:
                 run_type="independent",
                 resume=resume,
                 prompt_key=prompt_key,
+                batch=use_batch,
             )
             completed_runs.append(("Coder B", run_id_b))
             progress_b.progress(100, text="Coder B done!")
