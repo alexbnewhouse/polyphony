@@ -42,6 +42,47 @@ All model calls are logged with full prompts, responses, model versions, tempera
 
 ### 1. Install
 
+#### Using `uv` (recommended)
+
+[`uv`](https://docs.astral.sh/uv/) is a fast Python package manager that handles virtual environments automatically. It is the recommended way to install polyphony, especially on **Windows Subsystem for Linux (WSL)**.
+
+```bash
+# Install uv (if you don't have it yet)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# WSL users: after installing, reload your shell or run:
+source $HOME/.local/bin/env
+
+# Clone the repository
+git clone https://github.com/alexbnewhouse/polyphony.git
+cd polyphony
+
+# Create a virtual environment and install polyphony (editable install)
+uv venv
+source .venv/bin/activate        # Linux / macOS / WSL
+# .venv\Scripts\activate         # Windows (PowerShell, outside WSL)
+
+uv pip install -e .
+
+# For the web GUI (Streamlit):
+uv pip install -e ".[gui]"
+
+# For local models: install Ollama (https://ollama.ai) and pull a model
+ollama pull llama3.1:8b
+
+# For cloud APIs (optional):
+uv pip install -e ".[openai]"          # OpenAI / Azure OpenAI
+uv pip install -e ".[anthropic]"       # Anthropic (Claude)
+uv pip install -e ".[all-providers]"   # Both
+```
+
+> **WSL tip:** If `uv` is not found after installation, add `$HOME/.local/bin` to your `PATH`:
+> ```bash
+> echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+> ```
+
+#### Using `pip`
+
 ```bash
 # Clone the repository
 git clone https://github.com/alexbnewhouse/polyphony.git
