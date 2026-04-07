@@ -28,7 +28,7 @@ All model calls are logged with full prompts, responses, model versions, tempera
 - **Flag & discussion system**: Ambiguous cases surface for structured debate
 - **Analytical memos**: Write theoretical/methodological notes throughout
 - **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
-- **Audio transcription ingest**: Upload audio interviews and auto-transcribe to text with local Whisper (`faster-whisper`) or OpenAI transcription APIs
+- **Audio transcription ingest**: Upload audio interviews and auto-transcribe to text with local Whisper (`faster-whisper`) or OpenAI transcription APIs, with automatic GPU acceleration (float16 on CUDA, int8 on CPU)
 - **Speaker diarization**: Identify and label individual speakers in multi-speaker audio (podcasts, focus groups) using pyannote.audio, with speaker-turn segmentation
 - **Podcast ingestion pipeline**: End-to-end podcast workflow — preview feeds with download size estimates, download episodes with safety limits, transcribe with diarization, and import with audio timestamps preserved
 - **RSS/Atom feed ingest**: Preview and selectively import feed entries into your corpus with provenance metadata, including full iTunes/podcast namespace parsing
@@ -56,7 +56,7 @@ This scans your hardware (RAM, GPU, Ollama status) and recommends the best model
 Based on your hardware, it recommends:
 - **Coding models** — local models (free, private) or cloud providers (faster, higher quality)
 - **Multimodal / vision models** — models that can code images alongside text (LLaVA, GPT-4o, Claude)
-- **Whisper transcription models** — local Whisper model size (tiny → large-v3) matched to your VRAM, plus cloud alternative
+- **Whisper transcription models** — local Whisper model size (tiny → large-v3) matched to your VRAM, plus cloud alternative. Recommends GPU-optimized `float16` compute type when a CUDA GPU is detected, or CPU-optimized `int8` otherwise
 - **Speaker diarization** — install status and setup steps for `pyannote.audio`
 
 It prints the exact next steps to get started. The same wizard is available in the GUI under **Settings → Setup Wizard**.
@@ -528,11 +528,14 @@ click, rich, pydantic, ollama, krippendorff, scikit-learn, numpy, pandas, PyYAML
 ```bash
 pip install polyphony[images]          # Pillow for image metadata
 pip install polyphony[audio]           # faster-whisper local transcription
+pip install polyphony[audio-gpu]       # faster-whisper + CUDA libraries for GPU acceleration
 pip install polyphony[diarize]         # Speaker diarization (pyannote.audio + faster-whisper)
 pip install polyphony[openai]          # OpenAI API support
 pip install polyphony[anthropic]       # Anthropic API support
 pip install polyphony[all-providers]   # All cloud providers
 ```
+
+> **GPU acceleration:** If you have an NVIDIA GPU, install `polyphony[audio-gpu]` instead of `polyphony[audio]` to get CUDA-accelerated transcription. This automatically uses `float16` inference, which is 10–30× faster than CPU `int8`. The setup wizard (`polyphony setup`) detects your GPU and recommends the right install command.
 
 ---
 

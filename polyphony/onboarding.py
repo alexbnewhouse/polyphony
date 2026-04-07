@@ -81,6 +81,7 @@ class WhisperRecommendation:
     estimated_speed: str   # "fast", "moderate", "slow"
     estimated_vram_gb: float  # approximate VRAM/RAM needed
     local: bool = True     # True = faster-whisper, False = OpenAI API
+    compute_type: str = "auto"  # "auto", "float16", "int8", "float32"
 
 
 @dataclass
@@ -390,6 +391,9 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
     faster_whisper_ok = _check_faster_whisper()
     pyannote_ok = _check_pyannote()
 
+    # Determine optimal compute type: float16 for GPU tiers, int8 for CPU-only
+    gpu_compute = "float16" if hw.has_gpu else "int8"
+
     if tier == "local_high":
         whisper_recs.append(WhisperRecommendation(
             model_size="large-v3",
@@ -398,6 +402,7 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
                    "highest-quality transcription.",
             estimated_speed="moderate",
             estimated_vram_gb=4.0,
+            compute_type=gpu_compute,
         ))
         whisper_recs.append(WhisperRecommendation(
             model_size="medium",
@@ -405,6 +410,7 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
             reason="Faster than large-v3 with minimal quality loss.",
             estimated_speed="fast",
             estimated_vram_gb=2.5,
+            compute_type=gpu_compute,
         ))
     elif tier == "local_mid":
         whisper_recs.append(WhisperRecommendation(
@@ -413,6 +419,7 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
             reason="Best accuracy that fits comfortably in your available VRAM.",
             estimated_speed="fast",
             estimated_vram_gb=1.5,
+            compute_type=gpu_compute,
         ))
         whisper_recs.append(WhisperRecommendation(
             model_size="medium",
@@ -420,6 +427,7 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
             reason="Fits in VRAM but will be noticeably slower.",
             estimated_speed="moderate",
             estimated_vram_gb=2.5,
+            compute_type=gpu_compute,
         ))
     elif tier == "local_low":
         whisper_recs.append(WhisperRecommendation(
@@ -429,6 +437,7 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
                    "Runs on CPU without a GPU.",
             estimated_speed="moderate",
             estimated_vram_gb=0.5,
+            compute_type="int8",
         ))
         whisper_recs.append(WhisperRecommendation(
             model_size="tiny",
@@ -437,6 +446,7 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
                    "with accents or technical vocabulary.",
             estimated_speed="fast",
             estimated_vram_gb=0.3,
+            compute_type="int8",
         ))
 
     # Always offer cloud Whisper as alternative
@@ -467,9 +477,21 @@ def generate_recommendations(hw: HardwareProfile) -> OnboardingResult:
 
     # Audio setup steps
     if not faster_whisper_ok:
+        if hw.has_gpu:
+            setup_steps.append(
+                "For GPU-accelerated audio transcription: pip install 'polyphony[audio-gpu]' "
+                "(installs faster-whisper + CUDA libraries for float16 inference)"
+            )
+        else:
+            setup_steps.append(
+                "For audio transcription: pip install 'polyphony[audio]' "
+                "(installs faster-whisper for local Whisper)"
+            )
+    elif hw.has_gpu:
+        # faster-whisper installed but might not have CUDA libs
         setup_steps.append(
-            "For audio transcription: pip install 'polyphony[audio]' "
-            "(installs faster-whisper for local Whisper)"
+            "For GPU-accelerated transcription: pip install 'polyphony[audio-gpu]' "
+            "(ensures CUDA libraries are available for float16 on your GPU)"
         )
     if not pyannote_ok:
         setup_steps.append(

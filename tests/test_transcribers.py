@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from polyphony.io.transcribers import store_audio_file, transcribe_audio_file
+from polyphony.io.transcribers import (
+    _select_compute_type,
+    store_audio_file,
+    transcribe_audio_file,
+)
 
 
 def _make_wav(path: Path, seconds: int = 1, sample_rate: int = 8000) -> None:
@@ -127,3 +131,43 @@ def test_transcribe_audio_file_rejects_empty_transcript(tmp_path, monkeypatch):
             project_audio_dir=tmp_path / "audio",
             provider="local_whisper",
         )
+
+
+# ─── _select_compute_type ────────────────────────────────────────────────────
+
+
+class TestSelectComputeType:
+    def test_explicit_float16(self):
+        assert _select_compute_type("float16", device="auto") == "float16"
+
+    def test_explicit_int8(self):
+        assert _select_compute_type("int8", device="cpu") == "int8"
+
+    def test_explicit_float32(self):
+        assert _select_compute_type("float32", device="auto") == "float32"
+
+    def test_rejects_invalid_type(self):
+        with pytest.raises(ValueError, match="Unsupported compute_type"):
+            _select_compute_type("bfloat16", device="auto")
+
+    def test_auto_returns_float16_for_cuda_device(self):
+        assert _select_compute_type(None, device="cuda") == "float16"
+
+    def test_auto_returns_int8_for_cpu_device(self):
+        # When device is not cuda and ctranslate2 doesn't report cuda support
+        assert _select_compute_type(None, device="cpu") == "int8"
+
+    def test_auto_string_behaves_like_none(self):
+        assert _select_compute_type("auto", device="cuda") == "float16"
+
+    def test_auto_no_cuda_falls_back_int8(self, monkeypatch):
+        # Simulate ctranslate2 not available
+        import polyphony.io.transcribers as mod
+        monkeypatch.setattr(
+            "builtins.__import__",
+            lambda name, *a, **kw: (_ for _ in ()).throw(ImportError)
+            if name == "ctranslate2"
+            else __builtins__.__import__(name, *a, **kw),  # type: ignore[attr-defined]
+        )
+        # device="auto" with no ctranslate2 → int8
+        assert _select_compute_type(None, device="auto") == "int8"

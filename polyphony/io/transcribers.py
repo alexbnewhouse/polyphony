@@ -228,12 +228,48 @@ def store_audio_file(
     }
 
 
+SUPPORTED_COMPUTE_TYPES = frozenset({"int8", "float16", "float32", "auto"})
+
+
+def _select_compute_type(
+    compute_type: Optional[str] = None,
+    device: str = "auto",
+) -> str:
+    """Pick an appropriate CTranslate2 compute type for the device.
+
+    - ``"auto"`` (default): ``float16`` when CUDA is available, ``int8`` on CPU.
+    - An explicit value (``"int8"``, ``"float16"``, ``"float32"``) is returned as-is.
+    """
+    if compute_type is not None and compute_type != "auto":
+        ct = compute_type.strip().lower()
+        if ct not in SUPPORTED_COMPUTE_TYPES:
+            raise ValueError(
+                f"Unsupported compute_type '{compute_type}'. "
+                f"Choose from: {', '.join(sorted(SUPPORTED_COMPUTE_TYPES))}"
+            )
+        return ct
+
+    # Auto-detect: prefer float16 on CUDA, int8 on CPU
+    if device == "cuda":
+        return "float16"
+    if device == "auto":
+        try:
+            import ctranslate2  # type: ignore[import-not-found]
+
+            if ctranslate2.get_cuda_device_count() > 0:
+                return "float16"
+        except Exception:
+            pass
+    return "int8"
+
+
 def _transcribe_local_whisper(
     audio_path: Path,
     *,
     model: str,
     language: Optional[str],
     prompt: Optional[str],
+    compute_type: Optional[str] = None,
     diarize: bool = False,
     num_speakers: Optional[int] = None,
     min_speakers: Optional[int] = None,
@@ -245,7 +281,8 @@ def _transcribe_local_whisper(
             "Install with: pip install 'polyphony[audio]'"
         )
 
-    whisper = _WhisperModel(model_size_or_path=model, device="auto", compute_type="int8")
+    resolved_ct = _select_compute_type(compute_type, device="auto")
+    whisper = _WhisperModel(model_size_or_path=model, device="auto", compute_type=resolved_ct)
     segments_iter, info = whisper.transcribe(
         str(audio_path),
         language=language,
@@ -366,6 +403,7 @@ def transcribe_audio_file(
     model: Optional[str] = None,
     language: Optional[str] = None,
     prompt: Optional[str] = None,
+    compute_type: Optional[str] = None,
     max_audio_bytes: int = _DEFAULT_MAX_AUDIO_BYTES,
     diarize: bool = False,
     num_speakers: Optional[int] = None,
@@ -427,6 +465,7 @@ def transcribe_audio_file(
             model=chosen_model,
             language=language_code,
             prompt=prompt,
+            compute_type=compute_type,
             diarize=diarize,
             num_speakers=num_speakers,
             min_speakers=min_speakers,

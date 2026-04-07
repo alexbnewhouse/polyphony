@@ -322,13 +322,19 @@ with tab_setup:
             )
             wh_rows = []
             for wr in result.whisper_recommendations:
-                wh_rows.append({
+                row = {
                     "Model": wr.model_size,
                     "Type": "Cloud" if not wr.local else "Local",
                     "Description": wr.label,
                     "Speed": wr.estimated_speed.title(),
                     "VRAM / RAM": "—" if wr.estimated_vram_gb == 0.0 else f"~{wr.estimated_vram_gb:.1f} GB",
-                })
+                }
+                if wr.local:
+                    ct_labels = {"float16": "float16 (GPU)", "int8": "int8 (CPU)", "auto": "auto"}
+                    row["Compute Type"] = ct_labels.get(wr.compute_type, wr.compute_type)
+                else:
+                    row["Compute Type"] = "—"
+                wh_rows.append(row)
             st.dataframe(pd.DataFrame(wh_rows), use_container_width=True, hide_index=True)
 
             col_fw, col_pa = st.columns(2)
@@ -351,6 +357,22 @@ with tab_setup:
                 "Larger models give better accuracy but need more VRAM and run slower.  \n"
                 "Speaker diarization requires a Hugging Face token (`HF_TOKEN`)."
             )
+
+            # GPU acceleration guidance
+            if hw.has_gpu:
+                st.success(
+                    "🚀 **GPU detected!** Transcription will automatically use "
+                    "`float16` on your GPU for significantly faster processing (10–30× vs CPU)."
+                )
+                st.caption(
+                    "For GPU acceleration, ensure CUDA libraries are available: "
+                    "`pip install 'polyphony[audio-gpu]'`"
+                )
+            else:
+                st.info(
+                    "No GPU detected — transcription will use `int8` on CPU. "
+                    "Add a CUDA-capable GPU for 10–30× speed improvement."
+                )
 
         # Setup steps
         if result.setup_steps:

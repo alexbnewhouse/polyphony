@@ -44,6 +44,11 @@ images = [
 audio = [
     "faster-whisper>=1.0",
 ]
+audio-gpu = [
+    "faster-whisper>=1.0",
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
+]
 diarize = [
     "faster-whisper>=1.0",
     "pyannote.audio>=3.1",
@@ -57,6 +62,8 @@ all = [
     "anthropic>=0.30",
     "Pillow>=10.0",
     "faster-whisper>=1.0",
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
     "pyannote.audio>=3.1",
     "streamlit>=1.30.0",
     "plotly>=5.18.0",

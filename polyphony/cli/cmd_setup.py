@@ -79,6 +79,7 @@ def setup(ctx, json_output: bool) -> None:
                     "speed": w.estimated_speed,
                     "vram_gb": w.estimated_vram_gb,
                     "local": w.local,
+                    "compute_type": w.compute_type,
                 }
                 for w in result.whisper_recommendations
             ],
@@ -208,6 +209,7 @@ def setup(ctx, json_output: bool) -> None:
         wh_table = Table(title="🎙️  Audio Transcription (Whisper)", border_style="cyan")
         wh_table.add_column("Model", style="bold")
         wh_table.add_column("Type")
+        wh_table.add_column("Compute")
         wh_table.add_column("Description")
         wh_table.add_column("Speed")
         wh_table.add_column("VRAM / RAM")
@@ -218,11 +220,17 @@ def setup(ctx, json_output: bool) -> None:
                 "moderate": "[yellow]Moderate[/]",
                 "slow": "[red]Slow[/]",
             }
+            ct_map = {
+                "float16": "[green]float16 (GPU)[/]",
+                "int8": "int8 (CPU)",
+                "auto": "auto",
+            }
             model_type = "Cloud" if not wr.local else "Local"
             vram_label = "—" if wr.estimated_vram_gb == 0.0 else f"~{wr.estimated_vram_gb:.1f} GB"
             wh_table.add_row(
                 wr.model_size,
                 model_type,
+                ct_map.get(wr.compute_type, wr.compute_type) if wr.local else "—",
                 wr.label,
                 speed_map.get(wr.estimated_speed, wr.estimated_speed),
                 vram_label,
@@ -246,6 +254,20 @@ def setup(ctx, json_output: bool) -> None:
             "→ medium (769M) → large-v3 (1.5B params).  "
             "Larger ≈ better accuracy but slower & more VRAM.[/]"
         )
+        if hw.has_gpu:
+            console.print(
+                "  [bold green]GPU detected![/] Transcription will automatically use "
+                "[bold]float16[/] on your GPU for significantly faster processing."
+            )
+            console.print(
+                "  [dim]For GPU acceleration, ensure CUDA libraries are available: "
+                "pip install 'polyphony\\[audio-gpu]'[/]"
+            )
+        else:
+            console.print(
+                "  [dim]No GPU detected — transcription will use int8 on CPU. "
+                "Add a CUDA-capable GPU for 10–30× speed improvement.[/]"
+            )
 
     # ── Setup steps ──────────────────────────────────────────────────
     if result.setup_steps:

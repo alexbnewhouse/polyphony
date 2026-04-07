@@ -282,6 +282,38 @@ class TestWhisperRecommendations:
         assert isinstance(result.faster_whisper_installed, bool)
         assert isinstance(result.pyannote_installed, bool)
 
+    def test_local_high_gpu_recommends_float16(self):
+        hw = _make_hw(
+            ram_total_mb=32768,
+            gpus=[GPUInfo(name="RTX 4090", vram_mb=24576)],
+        )
+        result = generate_recommendations(hw)
+        local_whisper = [w for w in result.whisper_recommendations if w.local]
+        assert all(w.compute_type == "float16" for w in local_whisper)
+
+    def test_local_mid_gpu_recommends_float16(self):
+        hw = _make_hw(
+            ram_total_mb=16384,
+            gpus=[GPUInfo(name="RTX 3060", vram_mb=6144)],
+        )
+        result = generate_recommendations(hw)
+        local_whisper = [w for w in result.whisper_recommendations if w.local]
+        assert all(w.compute_type == "float16" for w in local_whisper)
+
+    def test_local_low_cpu_recommends_int8(self):
+        hw = _make_hw(ram_total_mb=8192, gpus=[])
+        result = generate_recommendations(hw)
+        local_whisper = [w for w in result.whisper_recommendations if w.local]
+        assert all(w.compute_type == "int8" for w in local_whisper)
+
+    def test_apple_silicon_recommends_float16(self):
+        hw = _make_hw(
+            ram_total_mb=32768, apple_silicon=True, os_name="Darwin",
+        )
+        result = generate_recommendations(hw)
+        local_whisper = [w for w in result.whisper_recommendations if w.local]
+        assert all(w.compute_type == "float16" for w in local_whisper)
+
 
 # ─── Audio dependency detection ──────────────────────────────────────────────
 
@@ -313,6 +345,34 @@ class TestAudioDetection:
             result = generate_recommendations(hw)
         assert not any("polyphony[audio]" in step for step in result.setup_steps)
         assert not any("polyphony[diarize]" in step for step in result.setup_steps)
+
+    def test_gpu_machine_recommends_audio_gpu_extra(self):
+        hw = _make_hw(
+            ram_total_mb=32768,
+            gpus=[GPUInfo(name="RTX 4090", vram_mb=24576)],
+        )
+        with patch("polyphony.onboarding._check_faster_whisper", return_value=False), \
+             patch("polyphony.onboarding._check_pyannote", return_value=False):
+            result = generate_recommendations(hw)
+        assert any("polyphony[audio-gpu]" in step for step in result.setup_steps)
+
+    def test_gpu_machine_with_whisper_still_suggests_cuda_libs(self):
+        hw = _make_hw(
+            ram_total_mb=32768,
+            gpus=[GPUInfo(name="RTX 4090", vram_mb=24576)],
+        )
+        with patch("polyphony.onboarding._check_faster_whisper", return_value=True), \
+             patch("polyphony.onboarding._check_pyannote", return_value=True):
+            result = generate_recommendations(hw)
+        assert any("audio-gpu" in step for step in result.setup_steps)
+
+    def test_cpu_machine_does_not_suggest_audio_gpu(self):
+        hw = _make_hw(ram_total_mb=8192, gpus=[])
+        with patch("polyphony.onboarding._check_faster_whisper", return_value=False), \
+             patch("polyphony.onboarding._check_pyannote", return_value=False):
+            result = generate_recommendations(hw)
+        assert not any("audio-gpu" in step for step in result.setup_steps)
+        assert any("polyphony[audio]" in step for step in result.setup_steps)
 
 
 # ─── Integration ──────────────────────────────────────────────────────────────
