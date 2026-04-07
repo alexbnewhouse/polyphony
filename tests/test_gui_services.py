@@ -151,6 +151,27 @@ def test_safe_error_api_key_leak():
     assert "api" in msg.lower() or "auth" in msg.lower()
 
 
+def test_safe_error_redacts_openai_key():
+    """OpenAI-style sk- keys are redacted from error messages."""
+    e = RuntimeError("Bad request with key sk-proj-abcdefghijklmnopqrstuvwxyz123456")
+    msg = safe_error_message(e, "Call")
+    assert "sk-proj-" not in msg
+
+
+def test_safe_error_redacts_anthropic_key():
+    """Anthropic-style sk-ant- keys are redacted from error messages."""
+    e = RuntimeError("Auth failed: sk-ant-api03-AAAAABBBBBCCCCCDDDDDEEEEE")
+    msg = safe_error_message(e, "Call")
+    assert "sk-ant-" not in msg
+
+
+def test_safe_error_redacts_generic_token():
+    """Generic token=value patterns are redacted."""
+    e = RuntimeError("api_key='super_secret_value_12345'")
+    msg = safe_error_message(e, "Call")
+    assert "super_secret" not in msg
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CodingProgress
 # ─────────────────────────────────────────────────────────────────────────────

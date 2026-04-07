@@ -184,6 +184,14 @@ def _check_ollama() -> tuple[bool, bool, list[str]]:
             if parsed.scheme not in ("http", "https"):
                 return installed, False, []
 
+            # Validate hostname is not an internal/private address
+            hostname = parsed.hostname or ""
+            if not hostname or hostname in (
+                "169.254.169.254",  # Cloud metadata endpoint
+            ):
+                logger.warning("Blocked unsafe Ollama host: %s", hostname)
+                return installed, False, []
+
             with urllib.request.urlopen(  # noqa: S310
                 f"{host}/", timeout=3
             ):

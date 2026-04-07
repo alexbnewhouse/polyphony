@@ -4,8 +4,8 @@ polyphony.pipeline.coding
 Independent coding pipeline.
 
 Each agent codes every segment using the active codebook version.
-Agents run sequentially (not in parallel) to keep SQLite writes simple
-and avoid Ollama resource contention on a single GPU.
+Agents may run in parallel (each with its own DB connection) when
+launched from the calibration or induction pipelines.
 
 Independence is enforced: during a run, each agent's prompt contains only
 the codebook and the target segment — never the other agent's assignments.
@@ -13,6 +13,7 @@ the codebook and the target segment — never the other agent's assignments.
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
 from typing import List, Optional
@@ -24,6 +25,20 @@ from ..db import fetchall, fetchone, insert, json_col
 from ..prompts import library as prompt_lib, format_codebook
 
 console = Console()
+
+# Simple cache for formatted codebook text keyed by frozen code IDs.
+_codebook_cache: dict[frozenset, str] = {}
+
+
+def _cached_format_codebook(codes: list[dict]) -> str:
+    """Return format_codebook(codes) with caching by code IDs."""
+    key = frozenset((c["id"], c.get("name", "")) for c in codes)
+    cached = _codebook_cache.get(key)
+    if cached is not None:
+        return cached
+    result = format_codebook(codes)
+    _codebook_cache[key] = result
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -48,7 +63,7 @@ def code_segment(
     Saves assignments to DB.
     """
     tmpl = prompt_lib[prompt_key]
-    codebook_text = format_codebook(codes)
+    codebook_text = _cached_format_codebook(codes)
 
     research_questions = json.loads(project.get("research_questions") or "[]")
     rq_text = "\n".join(f"  - {q}" for q in research_questions) or "(not specified)"
@@ -248,6 +263,7 @@ def estimate_tokens(text: str) -> int:
     return max(1, int(len(text) / _CHARS_PER_TOKEN))
 
 
+@functools.lru_cache(maxsize=256)
 def get_model_context_window(model_name: str) -> int:
     """
     Look up the context window for a model.
@@ -303,7 +319,7 @@ def create_batches(
     available_tokens = int(context_window * 0.70)
 
     # Estimate fixed overhead: system prompt + codebook
-    codebook_text = format_codebook(codes)
+    codebook_text = _cached_format_codebook(codes)
     research_questions = json.loads(project.get("research_questions") or "[]")
     rq_text = "\n".join(f"  - {q}" for q in research_questions) or "(not specified)"
 
@@ -397,7 +413,7 @@ def code_batch(
     if prompt_key.startswith("batch_"):
         batch_prompt_key = prompt_key
     tmpl = prompt_lib[batch_prompt_key]
-    codebook_text = format_codebook(codes)
+    codebook_text = _cached_format_codebook(codes)
 
     research_questions = json.loads(project.get("research_questions") or "[]")
     rq_text = "\n".join(f"  - {q}" for q in research_questions) or "(not specified)"

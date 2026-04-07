@@ -390,3 +390,31 @@ class TestRunOnboarding:
         assert result.hardware.ram_total_mb == 16384
         assert len(result.recommendations) > 0
         assert result.tier in ("local_high", "local_mid", "local_low", "cloud_only")
+
+
+# ─── SSRF protection ─────────────────────────────────────────────────────────
+
+from polyphony.onboarding import _check_ollama
+
+
+class TestOllamaSSRFProtection:
+    def test_blocks_metadata_endpoint(self, monkeypatch):
+        """Cloud metadata endpoint (169.254.169.254) must be blocked."""
+        monkeypatch.setenv("POLYPHONY_OLLAMA_HOST", "http://169.254.169.254")
+        monkeypatch.setattr("shutil.which", lambda x: "/usr/bin/ollama")
+        installed, running, models = _check_ollama()
+        assert running is False
+        assert models == []
+
+    def test_blocks_non_http_scheme(self, monkeypatch):
+        """Non-http/https schemes like file:// must be blocked."""
+        monkeypatch.setenv("POLYPHONY_OLLAMA_HOST", "file:///etc/passwd")
+        monkeypatch.setattr("shutil.which", lambda x: "/usr/bin/ollama")
+        installed, running, models = _check_ollama()
+        assert running is False
+
+    def test_blocks_empty_hostname(self, monkeypatch):
+        """Empty hostname must be blocked."""
+        monkeypatch.setenv("POLYPHONY_OLLAMA_HOST", "http://")
+        monkeypatch.setattr("shutil.which", lambda x: "/usr/bin/ollama")
+        installed, running, models = _check_ollama()

@@ -5,7 +5,7 @@ Codebook induction pipeline.
 
 Workflow:
   1. Sample N segments from the corpus (stratified by document).
-  2. Run each LLM agent on the sample (independently, different seeds).
+  2. Run each LLM agent on the sample (in parallel, different seeds).
   3. Collect candidate codes from both agents.
   4. Present merged, deduplicated list to human supervisor for review.
   5. Supervisor accepts/rejects/renames/merges candidates, adds criteria.
@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import random
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from rich.console import Console
@@ -25,6 +27,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from ..db import fetchall, fetchone, insert, json_col, update
+from ..db.connection import connect as db_connect
 from ..prompts import library as prompt_lib, format_codebook
 
 console = Console()
@@ -630,14 +633,34 @@ def run_induction(
         return run_id
 
     run_id_a = _make_run(agent_a)
-    candidates_a = run_agent_induction(agent_a, segments, project, run_id_a, conn)
-    console.print(f"  Agent A proposed {len(candidates_a)} codes.")
 
     if not skip_agent_b:
         run_id_b = _make_run(agent_b)
-        candidates_b = run_agent_induction(agent_b, segments, project, run_id_b, conn)
+
+    # Derive db_path for per-thread connections
+    _db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+
+    def _induct(agent, run_id):
+        thread_conn = db_connect(Path(_db_path))
+        orig_conn = agent.conn
+        agent.conn = thread_conn
+        try:
+            return run_agent_induction(agent, segments, project, run_id, thread_conn)
+        finally:
+            agent.conn = orig_conn
+            thread_conn.close()
+
+    if not skip_agent_b:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_a = executor.submit(_induct, agent_a, run_id_a)
+            future_b = executor.submit(_induct, agent_b, run_id_b)
+            candidates_a = future_a.result()
+            candidates_b = future_b.result()
+        console.print(f"  Agent A proposed {len(candidates_a)} codes.")
         console.print(f"  Agent B proposed {len(candidates_b)} codes.")
     else:
+        candidates_a = _induct(agent_a, run_id_a)
+        console.print(f"  Agent A proposed {len(candidates_a)} codes.")
         candidates_b = []
 
     # Step 5: Merge all candidate lists

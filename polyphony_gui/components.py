@@ -172,6 +172,9 @@ def require_project() -> tuple[dict, str, int]:
     project = st.session_state.get("active_project")
     db_path = st.session_state.get("active_project_db")
     if not project or not db_path:
-        st.warning("Please select or create a project first.")
+        st.warning(
+            "**No project selected.** Choose or create a project using the sidebar. "
+            "If no projects appear, go to the **Projects** page to create one."
+        )
         st.stop()
     return project, str(db_path), int(project["id"])

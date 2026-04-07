@@ -437,6 +437,15 @@ with tab_providers:
             keys = check_api_keys()
             if keys["openai"]:
                 st.success(f"API key set: `{keys['openai']}`")
+                if st.button("Test connection", key="test_openai"):
+                    with st.spinner("Testing OpenAI…"):
+                        try:
+                            import openai as _oai
+                            client = _oai.OpenAI()
+                            client.models.list()
+                            st.success("✅ Connection successful")
+                        except Exception as exc:
+                            st.error(f"Connection failed: {type(exc).__name__}")
             else:
                 st.warning("No API key found.")
                 st.markdown(
@@ -452,6 +461,19 @@ with tab_providers:
             st.caption("Use Claude models via the Anthropic API.")
             if keys["anthropic"]:
                 st.success(f"API key set: `{keys['anthropic']}`")
+                if st.button("Test connection", key="test_anthropic"):
+                    with st.spinner("Testing Anthropic…"):
+                        try:
+                            import anthropic as _anth
+                            client = _anth.Anthropic()
+                            client.messages.create(
+                                model="claude-3-haiku-20240307",
+                                max_tokens=10,
+                                messages=[{"role": "user", "content": "ping"}],
+                            )
+                            st.success("✅ Connection successful")
+                        except Exception as exc:
+                            st.error(f"Connection failed: {type(exc).__name__}")
             else:
                 st.warning("No API key found.")
                 st.markdown(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,7 +66,15 @@ def new_memo(ctx, memo_type, title, link_codes, link_segments, tags):
         tmp_path = f.name
 
     editor = os.environ.get("EDITOR", "nano")
-    subprocess.run(shlex.split(editor) + [tmp_path], check=True)
+    editor_parts = shlex.split(editor)
+    editor_bin = shutil.which(editor_parts[0])
+    if not editor_bin:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise click.ClickException(
+            f"Editor not found: '{editor_parts[0]}'. "
+            "Set $EDITOR to a valid editor (e.g. nano, vim, code)."
+        )
+    subprocess.run([editor_bin, *editor_parts[1:], tmp_path], check=True)
     content = Path(tmp_path).read_text().strip()
     Path(tmp_path).unlink()
 

@@ -24,6 +24,8 @@ import json
 import math
 import random
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, Future
+from pathlib import Path
 from typing import List, Optional
 
 from rich.console import Console
@@ -32,6 +34,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from ..db import fetchall, fetchone, insert, json_col
+from ..db.connection import connect as db_connect
 from ..pipeline.coding import run_coding_session
 from ..pipeline.irr import (
     compute_irr, compute_irr_multiway, print_irr_summary,
@@ -257,30 +260,41 @@ def run_calibration(
     # Ensure calibration set is marked
     mark_calibration_set(conn, project_id, n=calibration_sample_size)
 
+    # Derive db_path for creating per-thread connections
+    _db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+
     for round_num in range(1, max_rounds + 1):
         console.print(f"\n[bold cyan]═══ Calibration Round {round_num} ═══[/]\n")
 
-        # Run both agents on calibration set
-        run_id_a = run_coding_session(
-            conn, project, agent_a, codebook_version_id,
-            run_type="calibration",
-            batch=batch,
-        )
-        run_id_b = run_coding_session(
-            conn, project, agent_b, codebook_version_id,
-            run_type="calibration",
-            batch=batch,
-        )
+        # Run agents in parallel — each thread gets its own DB connection
+        def _run_agent(agent, label):
+            thread_conn = db_connect(Path(_db_path))
+            # Re-assign agent connection for this thread
+            orig_conn = agent.conn
+            agent.conn = thread_conn
+            try:
+                return run_coding_session(
+                    thread_conn, project, agent, codebook_version_id,
+                    run_type="calibration",
+                    batch=batch,
+                )
+            finally:
+                agent.conn = orig_conn
+                thread_conn.close()
 
-        # Optionally run supervisor as third coder
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_a = executor.submit(_run_agent, agent_a, "Agent A")
+            future_b = executor.submit(_run_agent, agent_b, "Agent B")
+            future_c: Optional[Future] = None
+            if three_way:
+                future_c = executor.submit(_run_agent, supervisor_agent, "Supervisor")
+
+            run_id_a = future_a.result()
+            run_id_b = future_b.result()
+
         run_id_c = None
-        if three_way:
-            console.print("\n[bold cyan]Supervisor calibration coding:[/]")
-            run_id_c = run_coding_session(
-                conn, project, supervisor_agent, codebook_version_id,
-                run_type="calibration",
-                batch=batch,
-            )
+        if three_way and future_c is not None:
+            run_id_c = future_c.result()
 
         # Compute IRR
         if three_way and run_id_c:

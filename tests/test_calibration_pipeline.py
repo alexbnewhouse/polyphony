@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 from polyphony.db import fetchone
 from polyphony.pipeline.calibration import mark_calibration_set, run_calibration
@@ -17,6 +18,7 @@ class StubCalibrationAgent:
         self.model_name = "stub"
         self.info = f"{role} (stub)"
         self._code_name = code_name
+        self.conn = None  # set by caller or parallelization code
 
     def call(self, call_type, system_prompt, user_prompt, images=None):
         payload = {
@@ -199,3 +201,41 @@ def test_run_calibration_below_threshold_allows_manual_stop(
     status = fetchone(conn, "SELECT status FROM project WHERE id = ?", (project_id,))
     assert status is not None
     assert status["status"] == "coding"
+
+
+def test_run_calibration_parallel_uses_separate_threads(
+    conn, project_id, document_id, codebook_version_id, monkeypatch,
+):
+    """Verify that calibration agents run in separate threads."""
+    project = _project(conn, project_id)
+    agent_a = StubCalibrationAgent(_agent_id(conn, project_id, "coder_a"), "coder_a")
+    agent_b = StubCalibrationAgent(_agent_id(conn, project_id, "coder_b"), "coder_b")
+
+    thread_names = []
+    original_run = None
+
+    def tracking_run_coding(*args, **kwargs):
+        thread_names.append(threading.current_thread().name)
+        return original_run(*args, **kwargs)
+
+    # Import the real function so we can wrap it
+    from polyphony.pipeline.coding import run_coding_session as real_run
+    original_run = real_run
+    monkeypatch.setattr("polyphony.pipeline.calibration.run_coding_session", tracking_run_coding)
+
+    results = run_calibration(
+        conn=conn,
+        project=project,
+        agent_a=agent_a,
+        agent_b=agent_b,
+        codebook_version_id=codebook_version_id,
+        irr_threshold=0.0,
+        calibration_sample_size=3,
+        max_rounds=1,
+        include_supervisor=False,
+    )
+
+    # Both agents should have run (2 coding sessions)
+    assert len(thread_names) == 2
+    # They should run in ThreadPoolExecutor threads, not the MainThread
+    assert all("ThreadPoolExecutor" in name for name in thread_names)

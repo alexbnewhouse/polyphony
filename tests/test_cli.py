@@ -800,3 +800,52 @@ def test_data_rss_import_deduplicates_by_guid(monkeypatch, tmp_path):
         assert docs_count["n"] == 1
     finally:
         conn.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EDITOR validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_codebook_edit_rejects_invalid_editor(monkeypatch, tmp_path):
+    """codebook edit should raise ClickException when EDITOR binary is not found."""
+    projects_root = tmp_path / "projects"
+    slug = "editor-test"
+    db_path = projects_root / slug / "project.db"
+    _seed_cli_project(db_path, slug=slug)
+
+    # Seed a codebook so the command reaches the editor path
+    conn = connect(db_path)
+    project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+    from polyphony.db import insert as db_insert, json_col as db_json_col
+
+    cb_id = db_insert(conn, "codebook_version", {
+        "project_id": project["id"],
+        "version": 1,
+        "stage": "draft",
+        "rationale": "test",
+    })
+    db_insert(conn, "code", {
+        "project_id": project["id"],
+        "codebook_version_id": cb_id,
+        "name": "TEST_CODE",
+        "description": "test code",
+        "level": "open",
+        "is_active": 1,
+        "sort_order": 0,
+        "example_quotes": db_json_col([]),
+    })
+    conn.commit()
+    conn.close()
+
+    env = {"POLYPHONY_PROJECTS_DIR": str(projects_root), "EDITOR": "__nonexistent_editor_42__"}
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["--project", slug, "codebook", "edit", "TEST_CODE"],
+        env=env,
+    )
+
+    assert result.exit_code != 0
+    assert "Editor not found" in result.output or "not found" in result.output.lower()

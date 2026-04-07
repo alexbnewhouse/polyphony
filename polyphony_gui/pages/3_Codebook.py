@@ -101,6 +101,11 @@ with tab_view:
                         "Level",
                         options=["open", "axial", "selective"],
                         index=["open", "axial", "selective"].index(sel_code.get("level", "open")),
+                        help=(
+                            "**Open** — initial descriptive labels. "
+                            "**Axial** — intermediate categories grouping open codes. "
+                            "**Selective** — high-level themes."
+                        ),
                     )
                     col_save, col_delete = st.columns(2)
                     save_btn = col_save.form_submit_button("Save Changes", type="primary")
@@ -370,6 +375,11 @@ with tab_induce:
                         options=["open", "axial", "selective"],
                         index=["open", "axial", "selective"].index(code.get("level", "open")),
                         key=f"level_{i}",
+                        help=(
+                            "**Open** — initial descriptive labels. "
+                            "**Axial** — intermediate categories grouping open codes. "
+                            "**Selective** — high-level themes."
+                        ),
                     )
                 with col2:
                     desc_val = st.text_area("Description", value=code.get("description", ""), key=f"desc_{i}", height=80)

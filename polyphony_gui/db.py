@@ -70,22 +70,26 @@ def load_project(db_path: str | Path) -> Optional[dict]:
 
 def get_project_stats(db_path: str | Path, project_id: int) -> dict:
     conn = connect(Path(db_path))
-    docs = fetchone(conn, "SELECT COUNT(*) AS n FROM document WHERE project_id = ?", (project_id,))["n"]
-    segs = fetchone(conn, "SELECT COUNT(*) AS n FROM segment WHERE project_id = ?", (project_id,))["n"]
-    codes = fetchone(conn, "SELECT COUNT(*) AS n FROM code WHERE project_id = ? AND is_active = 1", (project_id,))["n"]
-    asgn = fetchone(conn, "SELECT COUNT(*) AS n FROM assignment WHERE coding_run_id IN (SELECT id FROM coding_run WHERE project_id = ?)", (project_id,))["n"]
-    flags = fetchone(conn, "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND status = 'open'", (project_id,))["n"]
-    memos = fetchone(conn, "SELECT COUNT(*) AS n FROM memo WHERE project_id = ?", (project_id,))["n"]
+    counts = fetchone(conn, """
+        SELECT
+            (SELECT COUNT(*) FROM document WHERE project_id = ?) AS documents,
+            (SELECT COUNT(*) FROM segment WHERE project_id = ?) AS segments,
+            (SELECT COUNT(*) FROM code WHERE project_id = ? AND is_active = 1) AS codes,
+            (SELECT COUNT(*) FROM assignment WHERE coding_run_id IN
+                (SELECT id FROM coding_run WHERE project_id = ?)) AS assignments,
+            (SELECT COUNT(*) FROM flag WHERE project_id = ? AND status = 'open') AS open_flags,
+            (SELECT COUNT(*) FROM memo WHERE project_id = ?) AS memos
+    """, (project_id, project_id, project_id, project_id, project_id, project_id))
     runs = fetchall(conn, "SELECT * FROM coding_run WHERE project_id = ? ORDER BY id DESC", (project_id,))
     irr_runs = fetchall(conn, "SELECT * FROM irr_run WHERE project_id = ? ORDER BY id DESC LIMIT 5", (project_id,))
     conn.close()
     return {
-        "documents": docs,
-        "segments": segs,
-        "codes": codes,
-        "assignments": asgn,
-        "open_flags": flags,
-        "memos": memos,
+        "documents": counts["documents"],
+        "segments": counts["segments"],
+        "codes": counts["codes"],
+        "assignments": counts["assignments"],
+        "open_flags": counts["open_flags"],
+        "memos": counts["memos"],
         "coding_runs": runs,
         "irr_runs": irr_runs,
     }

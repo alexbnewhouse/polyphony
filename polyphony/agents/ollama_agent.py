@@ -12,6 +12,7 @@ Replicability notes:
 
 from __future__ import annotations
 
+import functools
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,6 +24,7 @@ except ImportError:
 from .base import BaseAgent, parse_json
 
 
+@functools.lru_cache(maxsize=32)
 def get_model_digest(model_name: str, host: str = "http://localhost:11434") -> str:
     """
     Return the Ollama manifest digest for the given model name.

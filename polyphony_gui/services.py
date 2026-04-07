@@ -12,6 +12,7 @@ This module wraps pipeline calls with:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,6 +79,16 @@ _USER_FRIENDLY_ERRORS = {
 }
 
 
+# Patterns that look like API keys / secrets — redact before showing to users.
+_SECRET_PATTERNS = re.compile(
+    r"sk-[A-Za-z0-9\-]{20,}"           # OpenAI keys
+    r"|sk-ant-[A-Za-z0-9\-]{20,}"      # Anthropic keys
+    r"|(?:api[_-]?key|token|authorization|secret)"
+    r"[\"']?\s*[:=]\s*[\"']?[^\s\"']+",  # Generic key=value patterns
+    re.IGNORECASE,
+)
+
+
 def safe_error_message(e: Exception, context: str = "Operation") -> str:
     """Return a user-friendly error message. Log the full traceback internally."""
     logger.error(f"{context} failed: {type(e).__name__}: {e}", exc_info=True)
@@ -87,6 +98,10 @@ def safe_error_message(e: Exception, context: str = "Operation") -> str:
         return _USER_FRIENDLY_ERRORS[error_type]
 
     msg = str(e)
+
+    # Redact anything that looks like an API key before further inspection
+    msg = _SECRET_PATTERNS.sub("[REDACTED]", msg)
+
     # Strip common internal prefixes
     if "api_key" in msg.lower() or "api key" in msg.lower():
         return "API authentication failed. Check that your API key is set correctly."

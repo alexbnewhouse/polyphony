@@ -173,3 +173,30 @@ def test_find_project_db_supports_relative_marker_path(tmp_path, monkeypatch):
     (workspace / ".polyphony_project").write_text("../projects/demo-project", encoding="utf-8")
 
     assert find_project_db(workspace) == db_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Database indexes migration
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_indexes_created_by_migration(conn):
+    """Migration 006 should create performance indexes on foreign key columns."""
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'"
+    ).fetchall()
+    index_names = {r["name"] for r in rows}
+
+    expected = {
+        "idx_assignment_segment_id",
+        "idx_assignment_code_id",
+        "idx_assignment_coding_run_id",
+        "idx_segment_document_id",
+        "idx_segment_project_calibration",
+        "idx_code_codebook_version_id",
+        "idx_flag_project_status",
+        "idx_coding_run_project_id",
+        "idx_memo_project_id",
+    }
+    missing = expected - index_names
+    assert not missing, f"Missing indexes: {missing}"
