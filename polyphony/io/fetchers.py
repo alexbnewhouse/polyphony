@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import re
+import ssl
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,6 +29,21 @@ from .net_safety import SafeRedirectHandler as _BaseSafeRedirectHandler, is_safe
 _MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 # Maximum page size for HTML scraping (5 MB)
 _MAX_PAGE_BYTES = 5 * 1024 * 1024
+
+
+def _make_ssl_context() -> ssl.SSLContext:
+    """Return an SSL context with verified certificates.
+
+    Prefers certifi's CA bundle (required on macOS where Python does not use
+    the system keychain).  Falls back to the default context if certifi is not
+    installed.
+    """
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        ctx = ssl.create_default_context()
+    return ctx
 
 _IMAGE_EXTENSIONS = frozenset({
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".avif",
@@ -147,7 +163,10 @@ def _scrape_one_page(
         return [{"status": "failed", "url": page_url, "metadata": metadata,
                  "error": "Page URL points to a private/internal address (blocked for security)"}]
 
-    opener = urllib.request.build_opener(SafeRedirectHandler())
+    opener = urllib.request.build_opener(
+        SafeRedirectHandler(),
+        urllib.request.HTTPSHandler(context=_make_ssl_context()),
+    )
     try:
         req = urllib.request.Request(page_url, headers={"User-Agent": "polyphony-fetcher/1.0"})
         with opener.open(req, timeout=timeout) as resp:
@@ -200,7 +219,10 @@ def _download_one(
             "error": "URL points to a private/internal address (blocked for security)",
         }
 
-    opener = urllib.request.build_opener(SafeRedirectHandler())
+    opener = urllib.request.build_opener(
+        SafeRedirectHandler(),
+        urllib.request.HTTPSHandler(context=_make_ssl_context()),
+    )
     filename = _sanitize_filename(url)
     last_error: Optional[str] = None
 
