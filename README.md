@@ -53,6 +53,7 @@ All model calls are logged with full prompts, responses, model versions, tempera
 - **Engagement dashboard**: Self-audit metrics tracking memos, flags, blind assessments, and human coding involvement (`analyze engagement`)
 - **Analytical memos**: Write theoretical/methodological notes throughout, with typed categories (analytic, methodological, reflexivity)
 - **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
+- **Inferential image scraper**: Fetch images from web pages (archive threads, gallery pages) rather than direct image URLs. Pass `--scraper 4plebs` or `--scraper generic` to `data fetch-images`; the scraper fetches each page, extracts full-size image links, and downloads them. The `4plebs` extractor targets `i.4pcdn.org` full-size images and skips thumbnails; `generic` finds any `<a href>` or `<img src>` pointing to an image file.
 - **Audio transcription ingest**: Upload audio interviews and auto-transcribe to text with local Whisper (`faster-whisper`) or OpenAI transcription APIs, with automatic GPU acceleration (float16 on CUDA, int8 on CPU)
 - **Speaker diarization**: Identify and label individual speakers in multi-speaker audio (podcasts, focus groups) using pyannote.audio, with speaker-turn segmentation
 - **Podcast ingestion pipeline**: End-to-end podcast workflow — preview feeds with download size estimates, download episodes with safety limits, transcribe with diarization, and import with audio timestamps preserved
@@ -197,7 +198,16 @@ polyphony data import data.json
 polyphony data import photos/*.jpg
 
 # Image URLs from CSV
+polyphony data import photos/*.jpg
+
+# Image URLs from CSV (direct links)
 polyphony data fetch-images image_urls.csv --url-column url
+
+# Images scraped from web pages (e.g. 4chan/4plebs archive threads)
+polyphony data fetch-images threads.csv --url-column "4PLEBS POST" --scraper 4plebs
+
+# Generic page scraper (any <a href> / <img src> images)
+polyphony data fetch-images pages.csv --url-column page_url --scraper generic
 
 # RSS/Atom feeds (preview then import selected entries)
 polyphony data rss preview https://example.com/feed.xml --limit 30
@@ -465,7 +475,7 @@ polyphony setup                Detect hardware and get LLM, audio & vision setup
 polyphony practice             Create an offline-first practice sandbox
 
 polyphony data import          Import documents (txt, csv, json, docx)
-polyphony data fetch-images    Fetch image URLs from CSV and import
+polyphony data fetch-images    Fetch image URLs from CSV and import (--url-column, --scraper, --metadata-columns, --max-concurrent)
 polyphony data rss preview     Preview RSS/Atom entries before import
 polyphony data rss import      Import selected RSS/Atom entries
 polyphony data transcribe      Transcribe audio files and import transcript text

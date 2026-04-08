@@ -13,7 +13,7 @@ from rich.table import Table
 
 from ..db import connect, fetchall, fetchone
 from ..generators import generate_llm_data, generate_template_data, get_domains
-from ..io.fetchers import fetch_images_from_csv
+from ..io.fetchers import fetch_images_from_csv, PAGE_EXTRACTORS
 from ..io.importers import import_documents, import_transcript_with_timestamps
 from ..io.podcast import (
     download_podcast_episodes,
@@ -791,8 +791,18 @@ def show_doc(ctx, doc_id, segments):
     show_default=True,
     help="Maximum number of concurrent downloads",
 )
+@click.option(
+    "--scraper",
+    default=None,
+    type=click.Choice(list(PAGE_EXTRACTORS.keys()), case_sensitive=False),
+    help=(
+        "Treat each URL as a web page and extract images from it. "
+        "'4plebs' targets i.4pcdn.org full-size images from 4plebs/4chan archive thread pages. "
+        "'generic' finds any <a href> or <img src> pointing to an image file."
+    ),
+)
 @click.pass_context
-def fetch_images(ctx, csv_path, url_column, metadata_columns, timeout, max_concurrent):
+def fetch_images(ctx, csv_path, url_column, metadata_columns, timeout, max_concurrent, scraper):
     """
     Fetch images from URLs in a CSV file and import them.
 
@@ -800,11 +810,17 @@ def fetch_images(ctx, csv_path, url_column, metadata_columns, timeout, max_concu
     them into the active project. Each image becomes one document with
     one segment (manual segmentation).
 
+    Use --scraper when the CSV column contains web page URLs (e.g. archive
+    thread pages) rather than direct image links. The scraper fetches each
+    page, extracts image URLs, and downloads them.
+
     \b
     Examples:
         polyphony data fetch-images urls.csv
         polyphony data fetch-images urls.csv --url-column image_url
         polyphony data fetch-images urls.csv --metadata-columns "label,source" --max-concurrent 10
+        polyphony data fetch-images threads.csv --url-column "4PLEBS POST" --scraper 4plebs
+        polyphony data fetch-images threads.csv --url-column page_url --scraper generic
     """
     db_path = ctx.obj.get("db_path")
     if not db_path:
@@ -829,6 +845,9 @@ def fetch_images(ctx, csv_path, url_column, metadata_columns, timeout, max_concu
 
     # Fetch images from CSV
     console.print(f"[bold]Fetching images from[/] {csv_path}")
+    extractor = PAGE_EXTRACTORS.get(scraper.lower()) if scraper else None
+    if extractor:
+        console.print(f"[dim]Scraper mode:[/] [cyan]{scraper}[/] — extracting images from page URLs")
     fetch_result = fetch_images_from_csv(
         csv_path=Path(csv_path),
         images_dir=images_dir,
@@ -836,6 +855,7 @@ def fetch_images(ctx, csv_path, url_column, metadata_columns, timeout, max_concu
         metadata_columns=meta_cols,
         timeout=timeout,
         max_concurrent=max_concurrent,
+        page_image_extractor=extractor,
     )
 
     downloaded = fetch_result["downloaded"]

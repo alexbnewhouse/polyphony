@@ -18,6 +18,9 @@ from polyphony.io.fetchers import (
     _sanitize_filename,
     SafeRedirectHandler,
     fetch_images_from_csv,
+    extract_html_images,
+    extract_4plebs_images,
+    PAGE_EXTRACTORS,
 )
 from polyphony.io.importers import sha256_bytes
 
@@ -51,7 +54,7 @@ def _write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
 
 
 class _ImageServer:
-    """Tiny HTTP server that serves a PNG for any path ending in .png."""
+    """Tiny HTTP server that serves PNGs and HTML pages for testing."""
 
     def __init__(self, tmp_path: Path):
         self.png_data = _make_minimal_png()
@@ -68,6 +71,31 @@ class _ImageServer:
                 elif self.path == "/timeout":
                     import time
                     time.sleep(60)
+                elif self.path == "/thread/123/":
+                    # Simulated thread archive page with two image links
+                    port = self.server.server_address[1]
+                    html = (
+                        "<html><body>"
+                        f'<a href="http://127.0.0.1:{port}/a.png">img1</a>'
+                        f'<a href="http://127.0.0.1:{port}/b.png">img2</a>'
+                        # thumbnail link — should NOT be included by 4plebs extractor
+                        f'<img src="http://127.0.0.1:{port}/1234567890123s.png">'
+                        # full-size link — should be included by 4plebs extractor
+                        # (uses fake 4pcdn hostname, tested separately)
+                        "</body></html>"
+                    )
+                    body = html.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif self.path == "/empty_thread/":
+                    body = b"<html><body><p>No images here</p></body></html>"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(body)
                 else:
                     self.send_response(404)
                     self.end_headers()
@@ -303,3 +331,138 @@ class TestFetchImagesFromCsv:
         total = len(result["downloaded"]) + len(result["skipped"])
         assert total == 2
         assert len(result["downloaded"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Page image extractor tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractHtmlImages:
+    def test_finds_href_links(self):
+        html = '<a href="/photo.jpg">click</a>'
+        urls = extract_html_images("http://example.com/page", html)
+        assert urls == ["http://example.com/photo.jpg"]
+
+    def test_finds_img_src(self):
+        html = '<img src="https://cdn.example.com/banner.png">'
+        urls = extract_html_images("http://example.com/", html)
+        assert urls == ["https://cdn.example.com/banner.png"]
+
+    def test_skips_non_image_hrefs(self):
+        html = '<a href="/about">About</a><a href="/pic.png">Pic</a>'
+        urls = extract_html_images("http://example.com/", html)
+        assert len(urls) == 1
+        assert urls[0].endswith("pic.png")
+
+    def test_skips_non_http_schemes(self):
+        html = '<a href="ftp://files.example.com/img.jpg">ftp</a>'
+        urls = extract_html_images("http://example.com/", html)
+        assert urls == []
+
+    def test_deduplicates(self):
+        html = '<a href="/x.jpg">1</a><a href="/x.jpg">2</a>'
+        urls = extract_html_images("http://example.com/", html)
+        assert urls == ["http://example.com/x.jpg"]
+
+    def test_resolves_relative_urls(self):
+        html = '<a href="../images/photo.png">p</a>'
+        urls = extract_html_images("http://example.com/blog/post/", html)
+        assert urls == ["http://example.com/blog/images/photo.png"]
+
+
+class TestExtract4plebsImages:
+    _FULL = "https://i.4pcdn.org/pol/1614460319054.jpg"
+    _THUMB = "https://i.4pcdn.org/pol/1636483147264s.jpg"
+
+    def test_collects_full_size(self):
+        html = f'<a href="{self._FULL}">view</a>'
+        urls = extract_4plebs_images("https://archive.4plebs.org/pol/thread/1/", html)
+        assert urls == [self._FULL]
+
+    def test_skips_thumbnails(self):
+        html = f'<img src="{self._THUMB}"><a href="{self._FULL}">view</a>'
+        urls = extract_4plebs_images("https://archive.4plebs.org/pol/thread/1/", html)
+        assert self._THUMB not in urls
+        assert self._FULL in urls
+
+    def test_skips_other_hosts(self):
+        html = '<a href="https://example.com/photo.jpg">ext</a>'
+        urls = extract_4plebs_images("https://archive.4plebs.org/pol/thread/1/", html)
+        assert urls == []
+
+    def test_deduplicates(self):
+        html = f'<a href="{self._FULL}">1</a><a href="{self._FULL}">2</a>'
+        urls = extract_4plebs_images("https://archive.4plebs.org/pol/thread/1/", html)
+        assert len(urls) == 1
+
+    def test_page_extractors_registry(self):
+        assert "4plebs" in PAGE_EXTRACTORS
+        assert PAGE_EXTRACTORS["4plebs"] is extract_4plebs_images
+        assert "generic" in PAGE_EXTRACTORS
+        assert PAGE_EXTRACTORS["generic"] is extract_html_images
+
+
+class TestFetchImagesWithPageScraper:
+    def test_scrapes_images_from_html_page(self, tmp_path, image_server):
+        """Scraper follows <a href> links on a page and downloads images."""
+        csv_path = tmp_path / "threads.csv"
+        images_dir = tmp_path / "images"
+        page_url = f"{image_server.base_url}/thread/123/"
+        _write_csv(csv_path, [{"url": page_url, "id": "row1"}], fieldnames=["url", "id"])
+
+        result = fetch_images_from_csv(
+            csv_path,
+            images_dir,
+            url_column="url",
+            page_image_extractor=extract_html_images,
+        )
+
+        assert len(result["failed"]) == 0
+        assert len(result["downloaded"]) >= 1
+        for entry in result["downloaded"]:
+            assert entry["path"].exists()
+            assert entry["metadata"].get("page_url") == page_url
+
+    def test_page_with_no_images_fails_gracefully(self, tmp_path, image_server):
+        csv_path = tmp_path / "threads.csv"
+        images_dir = tmp_path / "images"
+        page_url = f"{image_server.base_url}/empty_thread/"
+        _write_csv(csv_path, [{"url": page_url}], fieldnames=["url"])
+
+        result = fetch_images_from_csv(
+            csv_path, images_dir, page_image_extractor=extract_html_images,
+        )
+
+        assert len(result["failed"]) == 1
+        assert "No images found" in result["failed"][0]["error"]
+
+    def test_direct_image_url_still_works_with_extractor(self, tmp_path, image_server):
+        """If URL resolves to an image (not HTML), extractor still downloads it."""
+        csv_path = tmp_path / "urls.csv"
+        images_dir = tmp_path / "images"
+        _write_csv(
+            csv_path,
+            [{"url": f"{image_server.base_url}/direct.png"}],
+            fieldnames=["url"],
+        )
+
+        result = fetch_images_from_csv(
+            csv_path, images_dir, page_image_extractor=extract_html_images,
+        )
+
+        assert len(result["downloaded"]) == 1
+        assert len(result["failed"]) == 0
+
+    def test_bad_scheme_fails_with_extractor(self, tmp_path):
+        csv_path = tmp_path / "urls.csv"
+        images_dir = tmp_path / "images"
+        _write_csv(csv_path, [{"url": "ftp://example.com/thread/1/"}], fieldnames=["url"])
+
+        result = fetch_images_from_csv(
+            csv_path, images_dir, page_image_extractor=extract_html_images,
+        )
+
+        assert len(result["failed"]) == 1
+        assert "Unsupported scheme" in result["failed"][0]["error"]
+
