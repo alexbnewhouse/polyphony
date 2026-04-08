@@ -377,6 +377,7 @@ python -m polyphony_gui
 ### Features
 
 - **Tabbed data import**: Upload text files, Word documents, CSVs, images, audio (with transcription), podcasts (from RSS), and RSS/Atom feeds
+- **Multimodal segment browser**: Segment preview panels in codebook creation and AI induction display images inline, show speaker and timestamp badges for audio transcripts, and offer an inline audio player anchored to each segment's start time
 - **Practice mode**: One-click sample project to learn the workflow before using your own data
 - **Visual IRR dashboard**: Gauges, per-code agreement tables, and WCAG-accessible labels
 - **Human-leads induction**: Propose your own codes from a segment sample before AI runs induction
@@ -637,7 +638,7 @@ polyphony's test suite is designed to avoid confirmation bias by combining:
 - Integration tests for end-to-end workflows (imports, coding, IRR, export)
 - Adversarial tests that assert failure paths and guardrails (for example: unsafe redirects, invalid marker paths, non-overlapping IRR inputs, incompatible CLI options)
 - Scenario-based orchestration tests for calibration and coding session control flow (resume behavior, superseding incomplete runs, threshold-driven calibration exits, and 3-way calibration paths)
-- GUI service and component tests for the Streamlit layer (upload validation, codebook schema checks, error sanitisation, IRR formatting, model discovery)
+- GUI service and component tests for the Streamlit layer (upload validation, codebook schema checks, error sanitisation, IRR formatting, model discovery, multimodal segment rendering)
 
 Run the full suite:
 

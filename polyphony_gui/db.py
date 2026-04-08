@@ -337,7 +337,8 @@ def get_segments_preview(db_path: str | Path, project_id: int, limit: int = 20) 
     conn = connect(Path(db_path))
     rows = fetchall(
         conn,
-        "SELECT s.*, d.filename FROM segment s JOIN document d ON d.id = s.document_id "
+        "SELECT s.*, d.filename, d.source_path FROM segment s "
+        "JOIN document d ON d.id = s.document_id "
         "WHERE s.project_id = ? ORDER BY s.document_id, s.segment_index LIMIT ?",
         (project_id, limit),
     )

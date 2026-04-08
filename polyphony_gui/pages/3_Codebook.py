@@ -11,6 +11,7 @@ from pathlib import Path
 import streamlit as st
 
 from polyphony_gui.components import render_sidebar, require_project
+from polyphony_gui.components import render_segment
 from polyphony_gui.services import validate_codebook_rows, safe_error_message
 
 logger = logging.getLogger("polyphony_gui")
@@ -321,11 +322,23 @@ with tab_induce:
         )
 
         with st.expander(f"📄 Browse sampled segments ({len(segments_for_review)} total)", expanded=True):
+            # Enrich segments with document filename and source_path for display
+            from polyphony.db.connection import connect as _connect, fetchall as _fetchall
+            _conn = _connect(Path(db_path))
+            _doc_rows = _fetchall(
+                _conn,
+                "SELECT id, filename, source_path FROM document WHERE project_id = ?",
+                (project_id,),
+            )
+            _conn.close()
+            _doc_info = {r["id"]: r for r in _doc_rows}
             for seg in segments_for_review[:20]:
-                text = seg.get("text", "")
-                with st.container(border=True):
-                    st.caption(f"Segment {seg.get('id', '?')} — Doc {seg.get('document_id', '?')}")
-                    st.markdown(text[:500] + ("…" if len(text) > 500 else ""))
+                enriched = dict(seg)
+                doc = _doc_info.get(seg.get("document_id"))
+                if doc:
+                    enriched.setdefault("filename", doc["filename"])
+                    enriched.setdefault("source_path", doc.get("source_path"))
+                render_segment(enriched)
 
         st.markdown("#### Your Proposed Codes")
         st.markdown(
@@ -612,15 +625,7 @@ with tab_manual:
                 )
             seg_rows = get_segments_preview(db_path, project_id, limit=preview_n)
             for seg in seg_rows:
-                source = seg.get("filename", f"Doc {seg['document_id']}")
-                idx = seg.get("segment_index", "?")
-                text = seg.get("text", "")
-                if seg.get("media_type") == "image":
-                    st.markdown(f"**[{source} — Segment {idx}]** *(image)*")
-                else:
-                    with st.container(border=True):
-                        st.caption(f"{source} — Segment {idx}")
-                        st.markdown(text[:500] + ("…" if len(text) > 500 else ""))
+                render_segment(seg)
     else:
         st.warning("No segments found. Import and segment your documents first.")
 

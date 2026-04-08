@@ -8,6 +8,7 @@ selector, page guard clause, and reusable display helpers.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import streamlit as st
 
@@ -114,6 +115,81 @@ def build_coder_run_selector(a_runs: list[dict], b_runs: list[dict],
                                 format_func=lambda x: run_b_options[x],
                                 key=f"{prefix}_run_b")
     return run_a_id, run_b_id
+
+
+_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus"}
+
+
+def _fmt_seconds(s: float) -> str:
+    """Format seconds as M:SS."""
+    m = int(s) // 60
+    sec = int(s) % 60
+    return f"{m}:{sec:02d}"
+
+
+def render_segment(seg: dict, truncate: int = 500) -> None:
+    """Render a single segment card with full multimodal support.
+
+    Handles three media types:
+    - ``"image"``  — displays the image file if *image_path* resolves; falls
+      back to a descriptive label so the user knows a file is missing.
+    - ``"text"`` with audio metadata (``audio_start_sec`` / ``speaker``) —
+      shows the transcript text, speaker badge, timestamp badge, and an inline
+      audio player anchored to the segment's start time when the source audio
+      is available via ``source_path``.
+    - plain ``"text"`` — bordered container with source caption and truncated
+      text, matching the original behaviour.
+
+    The *seg* dict is expected to be a row from the ``segment`` table joined
+    with ``document.filename`` (and optionally ``document.source_path``).
+    """
+    source = seg.get("filename", f"Doc {seg.get('document_id', '?')}")
+    idx = seg.get("segment_index", "?")
+    media_type = seg.get("media_type", "text")
+
+    if media_type == "image":
+        img_path = seg.get("image_path")
+        with st.container(border=True):
+            st.caption(f"📷 {source} — Segment {idx}")
+            if img_path and Path(img_path).exists():
+                st.image(str(img_path))
+            else:
+                st.markdown(
+                    f"*Image file not found.*  \n`{img_path or 'no path stored'}`"
+                )
+        return
+
+    # ── Text / audio transcript ───────────────────────────────────────────
+    text = seg.get("text", "")
+    speaker = seg.get("speaker")
+    t_start = seg.get("audio_start_sec")
+    t_end = seg.get("audio_end_sec")
+    src_path = seg.get("source_path")
+
+    with st.container(border=True):
+        # Source caption
+        st.caption(f"{source} — Segment {idx}")
+
+        # Speaker + timestamp badges
+        badges: list[str] = []
+        if speaker:
+            badges.append(f"🎙️ **{speaker}**")
+        if t_start is not None:
+            ts = _fmt_seconds(t_start)
+            if t_end is not None:
+                ts += f"–{_fmt_seconds(t_end)}"
+            badges.append(f"⏱ {ts}")
+        if badges:
+            st.markdown("&nbsp;&nbsp;".join(badges))
+
+        # Transcript / text body
+        st.markdown(text[:truncate] + ("…" if len(text) > truncate else ""))
+
+        # Inline audio player — only when we have a start time and the file
+        if t_start is not None and src_path:
+            audio_file = Path(src_path)
+            if audio_file.exists() and audio_file.suffix.lower() in _AUDIO_EXTENSIONS:
+                st.audio(str(audio_file), start_time=int(t_start))
 
 
 def render_sidebar() -> None:

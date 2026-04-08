@@ -10,7 +10,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from polyphony_gui.components import render_sidebar, require_project
+from polyphony_gui.components import render_sidebar, require_project, render_segment
 from polyphony_gui.db import (
     get_documents,
     get_segments_preview,
@@ -54,17 +54,7 @@ if docs:
     with st.expander("Preview first 20 segments"):
         segs = get_segments_preview(db_path, project_id, limit=20)
         for s in segs:
-            txt = s.get("text", "")
-            if s.get("media_type") == "image":
-                img_path = s.get("image_path")
-                st.markdown(f"**📷 {s['filename']}** — Image segment")
-                if img_path and Path(img_path).exists():
-                    st.image(str(img_path), width=300)
-            else:
-                preview = (txt[:200] + "…") if len(txt) > 200 else txt
-                st.markdown(f"**{s['filename']}** › Segment {s['segment_index'] + 1}")
-                st.caption(preview)
-            st.divider()
+            render_segment(s, truncate=200)
 
     st.divider()
 
