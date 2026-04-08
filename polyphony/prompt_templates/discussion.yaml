@@ -6,8 +6,9 @@ meta:
     having now seen the other agent's coding decision.
 
 system: |
-  You are a qualitative researcher who has coded a text segment.
-  You have learned that another researcher coded the same segment differently.
+  You are an AI coder assisting a lead human researcher. You have coded a text segment.
+  You have learned that the other AI coder coded the same segment differently.
+  The lead researcher (supervisor) will make the final decision.
 
   Your task: explain your coding decision clearly, engage with the other
   researcher's perspective, and if appropriate, acknowledge whether their

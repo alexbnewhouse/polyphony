@@ -55,16 +55,24 @@ def flags(ctx, status):
     show_default=True,
     help="How to resolve: let agents explain, or supervisor decides directly",
 )
+@click.option(
+    "--blind", "blind_review", is_flag=True, default=False,
+    help="Shuffle agent labels so you can't tell which model produced which codes",
+)
 @click.pass_context
-def resolve(ctx, flag_id, mode):
+def resolve(ctx, flag_id, mode, blind_review):
     """
     Resolve a flagged case.
 
     In 'agent_facilitated' mode, each agent explains its reasoning before
     you make a final decision. In 'supervisor_override', you decide directly.
 
+    Use --blind to randomise agent labels (shown as "Coder 1" / "Coder 2"),
+    reducing anchoring on a preferred model.
+
     Example:
         polyphony discuss resolve 5 --mode agent_facilitated
+        polyphony discuss resolve 5 --blind
     """
     db_path = ctx.obj.get("db_path")
     if not db_path:
@@ -81,6 +89,7 @@ def resolve(ctx, flag_id, mode):
         agent_a=agent_a,
         agent_b=agent_b,
         mode=mode,
+        blind_review=blind_review,
     )
     conn.close()
 

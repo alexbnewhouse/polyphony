@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import sys
 
 import click
 from rich.console import Console
 
-from ..db import connect, fetchone
+from ..db import connect, fetchall, fetchone, from_json
 from ..pipeline.analysis import (
     check_saturation,
     code_frequency_by_document,
@@ -223,3 +224,148 @@ def speaker_codes(ctx):
         current_speaker = r["speaker"]
         table.add_row(speaker_label, r["code_name"], str(r["segment_count"]))
     console.print(table)
+
+
+@analyze.command("engagement")
+@click.pass_context
+def engagement(ctx):
+    """Show a dashboard of human engagement with the analytical process.
+
+    Displays memo counts, flag resolution stats, blind assessments,
+    codebook review stats, and calibration history — a quick self-audit
+    of how actively the human researcher has engaged.
+    """
+    db_path = ctx.obj.get("db_path")
+    if not db_path:
+        sys.exit(1)
+
+    conn = connect(db_path)
+    project = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+    pid = project["id"]
+
+    from rich.panel import Panel
+    from rich.table import Table
+
+    # ── Memo counts ──────────────────────────────────────────────────────
+    memo_rows = fetchall(
+        conn,
+        "SELECT memo_type, COUNT(*) AS n FROM memo WHERE project_id = ? GROUP BY memo_type",
+        (pid,),
+    )
+    memo_counts = {r["memo_type"]: r["n"] for r in memo_rows}
+    total_memos = sum(memo_counts.values())
+
+    # ── Flag stats ───────────────────────────────────────────────────────
+    total_flags = fetchone(
+        conn, "SELECT COUNT(*) AS n FROM flag WHERE project_id = ?", (pid,),
+    )["n"]
+    resolved_flags = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND status = 'resolved'",
+        (pid,),
+    )["n"]
+    deferred_flags = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND status = 'deferred'",
+        (pid,),
+    )["n"]
+    blind_coded = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND supervisor_blind_code IS NOT NULL",
+        (pid,),
+    )["n"]
+
+    # ── Human coding stats ───────────────────────────────────────────────
+    sup_assignments = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM assignment a "
+        "JOIN agent ag ON ag.id = a.agent_id "
+        "JOIN coding_run r ON r.id = a.coding_run_id "
+        "WHERE r.project_id = ? AND ag.role = 'supervisor'",
+        (pid,),
+    )["n"]
+    total_segments = fetchone(
+        conn, "SELECT COUNT(*) AS n FROM segment WHERE project_id = ?", (pid,),
+    )["n"]
+
+    # ── Codebook review stats ────────────────────────────────────────────
+    latest_cb = fetchone(
+        conn,
+        "SELECT * FROM codebook_version WHERE project_id = ? ORDER BY version DESC LIMIT 1",
+        (pid,),
+    )
+    review_stats = from_json(latest_cb.get("review_stats"), {}) if latest_cb else {}
+
+    # ── Calibration history ──────────────────────────────────────────────
+    cal_runs = fetchall(
+        conn,
+        "SELECT * FROM irr_run WHERE project_id = ? AND scope = 'calibration' ORDER BY computed_at",
+        (pid,),
+    )
+
+    conn.close()
+
+    # ── Render ───────────────────────────────────────────────────────────
+    table = Table(title="Human Engagement Dashboard", show_header=True, title_style="bold cyan")
+    table.add_column("Metric", style="bold")
+    table.add_column("Value", justify="right")
+    table.add_column("Note", style="dim")
+
+    # Memos
+    table.add_row("Total memos", str(total_memos), "")
+    for mtype, n in sorted(memo_counts.items()):
+        table.add_row(f"  └ {mtype}", str(n), "")
+
+    # Flags
+    table.add_row("Flags raised", str(total_flags), "")
+    table.add_row("  └ resolved", str(resolved_flags), "")
+    table.add_row("  └ deferred", str(deferred_flags), "genuinely ambiguous")
+    pct_blind = f"{blind_coded / total_flags:.0%}" if total_flags else "N/A"
+    table.add_row("  └ blind-assessed", str(blind_coded), pct_blind)
+
+    # Human coding
+    pct_coded = f"{sup_assignments / total_segments:.0%}" if total_segments else "N/A"
+    table.add_row("Segments human-coded", str(sup_assignments), f"of {total_segments} ({pct_coded})")
+
+    # Codebook review
+    if review_stats:
+        table.add_row("Codebook review", "", "")
+        table.add_row("  └ accepted verbatim", str(review_stats.get("accepted_verbatim", 0)), "")
+        table.add_row("  └ edited", str(review_stats.get("edited", 0)), "")
+        table.add_row("  └ rejected", str(review_stats.get("rejected", 0)), "")
+        table.add_row("  └ added manually", str(review_stats.get("added_manually", 0)), "")
+    else:
+        table.add_row("Codebook review", "—", "no induction review recorded")
+
+    # Calibration
+    if cal_runs:
+        alphas = [r.get("krippendorff_alpha") for r in cal_runs if r.get("krippendorff_alpha") is not None]
+        alpha_str = " → ".join(f"{a:.3f}" for a in alphas) if alphas else "—"
+        table.add_row("Calibration rounds", str(len(cal_runs)), alpha_str)
+    else:
+        table.add_row("Calibration rounds", "0", "")
+
+    console.print()
+    console.print(table)
+
+    # Quick assessment
+    has_reflexivity = memo_counts.get("reflexivity", 0) > 0
+    has_method_memos = memo_counts.get("methodological", 0) > 0
+
+    warnings = []
+    if not has_reflexivity:
+        warnings.append("No reflexivity memo found — consider writing one before export.")
+    if not has_method_memos:
+        warnings.append("No methodological memos — document your analytical decisions.")
+    if total_flags > 0 and blind_coded == 0:
+        warnings.append("No blind assessments recorded — use agent_facilitated mode for commit-then-reveal.")
+    if sup_assignments == 0:
+        warnings.append("No human-coded segments — consider coding a sample for 3-way IRR.")
+
+    if warnings:
+        console.print()
+        for w in warnings:
+            console.print(f"  [yellow]⚠ {w}[/]")
+    else:
+        console.print("\n  [green]✓ Strong human engagement across the board.[/]")
+    console.print()

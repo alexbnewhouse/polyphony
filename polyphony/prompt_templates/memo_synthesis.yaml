@@ -6,7 +6,8 @@ meta:
     Used by `polyphony analyze themes`.
 
 system: |
-  You are an expert qualitative researcher writing an analytical synthesis.
+  You are assisting a lead human researcher by drafting an analytical synthesis.
+  The researcher will review, revise, and contextualise your synthesis.
   Based on the codebook and code frequency information provided, write a
   structured analytical synthesis identifying the main themes in the data.
 

@@ -201,6 +201,40 @@ if run_btn:
             "You can now proceed to **Code Data**."
         )
         update_project_status(db_path, project_id, "calibrating")
+
+        # ── Memo gate: require methodological memo before proceeding ──
+        from polyphony_gui.db import has_memo_of_type, add_memo
+        if not has_memo_of_type(db_path, project_id, "methodological"):
+            st.divider()
+            st.warning(
+                "**Memo gate:** Before proceeding to coding, please write a brief "
+                "methodological memo documenting your calibration decisions."
+            )
+            with st.form("calibration_memo_gate"):
+                memo_content = st.text_area(
+                    "Calibration Decision Memo",
+                    placeholder=(
+                        "Why are you satisfied with this level of agreement? "
+                        "What adjustments were made to the codebook? "
+                        "Any codes still causing concern?"
+                    ),
+                    height=120,
+                )
+                save_memo_btn = st.form_submit_button("Save Memo & Proceed", type="primary")
+            if save_memo_btn:
+                if not memo_content.strip():
+                    st.error("Please write a memo before proceeding.")
+                else:
+                    add_memo(
+                        db_path, project_id,
+                        "Calibration Decision Memo",
+                        memo_content.strip(),
+                        memo_type="methodological",
+                    )
+                    st.success("Methodological memo saved. You may now proceed to **Code Data**.")
+                    st.rerun()
+        else:
+            st.info("Methodological memo already recorded. You may proceed to **Code Data**.")
     else:
         st.warning(
             f"Calibration below threshold (α = {alpha:.3f} < {threshold}). "

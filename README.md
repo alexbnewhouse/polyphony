@@ -4,6 +4,26 @@
 
 ---
 
+## When to Use polyphony (and When Not To)
+
+polyphony is designed for a specific epistemological niche. Before starting, consider
+whether it fits your study:
+
+**Good fit:**
+- Solo researchers who need multi-coder reliability but lack a research team
+- Exploratory or applied qualitative work (thematic analysis, content analysis, grounded theory) where systematic coding is the goal
+- Studies where you want to remain the primary analyst and use LLMs as a second pair of eyes — not as the lead coder
+- Extremism research, media analysis, interview studies, and similar domains where structured coding adds rigor
+
+**Not a good fit:**
+- Studies requiring deeply interpretive or phenomenological approaches where the researcher's lived experience is the primary instrument — LLM coders cannot replicate this
+- Datasets requiring domain expertise the LLMs lack (e.g. highly technical medical or legal coding)
+- Situations where you want to fully delegate analysis to AI — polyphony is designed to keep the human in the lead
+
+**The core principle:** You are the lead researcher. The LLMs are your research assistants, not your co-PIs. Every analytical decision flows through you: codebook design, calibration thresholds, flag resolution, and final interpretation. polyphony's workflow is built to reinforce this, with commit-then-reveal patterns, mandatory reflection gates, and full audit trails.
+
+---
+
 ## Overview
 
 In a traditional multi-coder QDA study, two or more researchers independently code the same data, then discuss disagreements until they reach agreement. polyphony replicates this workflow:
@@ -25,15 +45,20 @@ All model calls are logged with full prompts, responses, model versions, tempera
 - **Independent coding**: Agents code without seeing each other's work. The supervisor can code all segments or a representative sample (`--sample-size`)
 - **Deductive coding mode**: Strict codebook adherence with `--deductive` for theory-driven research
 - **Inter-rater reliability**: Krippendorff's alpha (2-way and 3-way), pairwise Cohen's kappa, percent agreement
-- **Flag & discussion system**: Ambiguous cases surface for structured debate
-- **Analytical memos**: Write theoretical/methodological notes throughout
+- **Flag & discussion system**: Ambiguous cases surface for structured debate with resolution modes (supervisor override, agent-facilitated, deferred)
+- **Blind review mode**: Anonymise coder identities during disagreement review to prevent anchoring bias (`--blind`)
+- **Commit-then-reveal patterns**: Record your own coding judgement before seeing AI output, preventing automation bias
+- **Mandatory reflection gates**: Methodological memo required after calibration; reflexivity statement required before replication export
+- **Coder cards**: Positionality statements for humans, capability declarations for AI — included in replication packages (`project coder-card`)
+- **Engagement dashboard**: Self-audit metrics tracking memos, flags, blind assessments, and human coding involvement (`analyze engagement`)
+- **Analytical memos**: Write theoretical/methodological notes throughout, with typed categories (analytic, methodological, reflexivity)
 - **Multimodal image support**: Import and code images (PNG, JPEG, GIF, WebP, BMP, TIFF) alongside text using vision-capable models
 - **Audio transcription ingest**: Upload audio interviews and auto-transcribe to text with local Whisper (`faster-whisper`) or OpenAI transcription APIs, with automatic GPU acceleration (float16 on CUDA, int8 on CPU)
 - **Speaker diarization**: Identify and label individual speakers in multi-speaker audio (podcasts, focus groups) using pyannote.audio, with speaker-turn segmentation
 - **Podcast ingestion pipeline**: End-to-end podcast workflow — preview feeds with download size estimates, download episodes with safety limits, transcribe with diarization, and import with audio timestamps preserved
 - **RSS/Atom feed ingest**: Preview and selectively import feed entries into your corpus with provenance metadata, including full iTunes/podcast namespace parsing
 - **Multiple model providers**: Ollama (local), OpenAI, Anthropic — mix and match across coders
-- **Full replication package**: Every prompt, response, decision, and prompt hash is exportable
+- **Full replication package**: Every prompt, response, decision, and prompt hash is exportable, plus coder cards and integrity checklist
 - **Supports multiple methodologies**: Grounded theory, thematic analysis, content analysis
 
 ---
@@ -344,6 +369,12 @@ python -m polyphony_gui
 - **Tabbed data import**: Upload text files, Word documents, CSVs, images, audio (with transcription), podcasts (from RSS), and RSS/Atom feeds
 - **Practice mode**: One-click sample project to learn the workflow before using your own data
 - **Visual IRR dashboard**: Gauges, per-code agreement tables, and WCAG-accessible labels
+- **Human-leads induction**: Propose your own codes from a segment sample before AI runs induction
+- **Blind review mode**: Toggle anonymous coder labels when reviewing disagreements, with commit-then-reveal gut-check
+- **Resolution modes**: Choose supervisor override, agent-facilitated discussion, or deferred for each flag
+- **Memo gates**: Mandatory methodological memo after calibration and reflexivity statement before replication export
+- **Coder card editor**: Fill in positionality statements (humans) and capability declarations (AI) under Settings
+- **Engagement dashboard**: Self-audit metrics on the Analysis page — memos, flags, blind assessments, human coding stats
 - **File size validation**: 100 MB per file, 500 MB total upload limit
 - **Error sanitization**: Internal errors are logged but never exposed to the user
 - **Codebook validation**: Schema checks on CSV/YAML imports (required fields, valid levels)

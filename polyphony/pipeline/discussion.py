@@ -87,10 +87,13 @@ def resolve_flag_interactive(
     agent_a=None,
     agent_b=None,
     mode: str = "supervisor_override",
+    blind_review: bool = False,
 ) -> None:
     """
     Interactively resolve a single flag.
     mode: 'supervisor_override' | 'agent_facilitated' | 'deferred'
+    blind_review: if True, shuffle agent labels so supervisor can't tell which
+        agent produced which codes (reduces anchoring on a "preferred" model).
     """
     flag = fetchone(conn, "SELECT * FROM flag WHERE id = ?", (flag_id,))
     if not flag:
@@ -118,6 +121,33 @@ def resolve_flag_interactive(
                 console.print(Panel(seg["text"], title="[cyan]Segment Text[/]"))
 
     if mode == "agent_facilitated" and agent_a and agent_b:
+        # ── Blind review: optionally shuffle agent labels ────────────────
+        import random
+
+        agents_ordered = [(agent_a, "A"), (agent_b, "B")]
+        if blind_review:
+            random.shuffle(agents_ordered)
+            console.print("[dim]Blind review mode: agent labels randomised.[/]")
+
+        # Map agents by stable agent_id (not Python object id)
+        agent_codes_map: dict[int, list] = {}
+
+        # ── Commit-then-reveal: ask human to assess before showing agent work ──
+        console.print(
+            "\n[bold]Before seeing the agents' codes, how would you code this segment?[/]"
+        )
+        blind_code = Prompt.ask(
+            "Your code(s) (comma-separated, or 'skip' to skip)",
+            default="skip",
+        )
+        if blind_code.strip().lower() != "skip":
+            console.print(f"  [dim]Recorded your blind assessment: {blind_code}[/]")
+            conn.execute(
+                "UPDATE flag SET supervisor_blind_code = ? WHERE id = ?",
+                (blind_code, flag_id),
+            )
+            conn.commit()
+
         from ..prompts import library as prompt_lib
         tmpl = prompt_lib.get("discussion")
         if tmpl:
@@ -137,12 +167,17 @@ def resolve_flag_interactive(
             codes_a = get_codes(agent_a)
             codes_b = get_codes(agent_b)
 
-            for agent, codes_self, codes_other, perspective in [
-                (agent_a, codes_a, codes_b, "a"),
-                (agent_b, codes_b, codes_a, "b"),
-            ]:
+            # Map agents by stable agent_id
+            agent_codes_map[agent_a.agent_id] = codes_a
+            agent_codes_map[agent_b.agent_id] = codes_b
+
+            for idx, (agent, display_label) in enumerate(agents_ordered):
                 if not hasattr(agent, '_call_llm'):
                     continue
+                codes_self = agent_codes_map[agent.agent_id]
+                other_agent = agents_ordered[1 - idx][0]
+                codes_other = agent_codes_map[other_agent.agent_id]
+                perspective = "a" if agent is agent_a else "b"
                 seg_text = seg["text"] if seg else "(no segment)"
                 if seg and seg.get("media_type") == "image":
                     seg_text = f"[IMAGE: {seg.get('image_path', 'unknown')}] (image attached)"
@@ -157,11 +192,15 @@ def resolve_flag_interactive(
                 _, parsed, call_id = agent.call("discussion", system, user, images=images)
                 explanation = parsed.get("explanation", "")
                 if explanation:
-                    label = "A" if perspective == "a" else "B"
+                    # In blind mode, show "Coder 1"/"Coder 2" instead of "Agent A"/"Agent B"
+                    if blind_review:
+                        title = f"[bold]Coder {idx + 1} explains[/]"
+                    else:
+                        title = f"[bold]Agent {display_label} explains[/]"
                     console.print(Panel(
                         explanation,
-                        title=f"[bold]Agent {label} explains[/]",
-                        border_style="green" if perspective == "a" else "yellow",
+                        title=title,
+                        border_style="green" if idx == 0 else "yellow",
                     ))
                     insert(conn, "discussion_turn", {
                         "flag_id": flag_id,

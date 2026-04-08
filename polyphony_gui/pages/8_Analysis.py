@@ -17,6 +17,7 @@ logger = logging.getLogger("polyphony_gui")
 from polyphony_gui.db import (
     get_codebook,
     update_project_status,
+    get_engagement_stats,
 )
 
 st.set_page_config(page_title="Analysis — Polyphony", page_icon="🔍", layout="wide")
@@ -62,11 +63,12 @@ def _normalize_synthesis_result(result: object, focus: str, n_themes: int) -> ob
 
     return result
 
-tab_freq, tab_saturation, tab_cooccurrence, tab_themes = st.tabs([
+tab_freq, tab_saturation, tab_cooccurrence, tab_themes, tab_engagement = st.tabs([
     "Code Frequencies",
     "Theoretical Saturation",
     "Co-occurrence",
     "Theme Synthesis",
+    "Engagement Dashboard",
 ])
 
 # ── Code frequencies ──────────────────────────────────────────────────────────
@@ -332,3 +334,82 @@ with tab_themes:
             content = json_lib.dumps(st.session_state["last_synthesis"], indent=2) if isinstance(st.session_state["last_synthesis"], dict) else str(st.session_state["last_synthesis"])
             add_memo(db_path, project_id, "Theme Synthesis", content, memo_type="synthesis")
             st.success("Saved as memo.")
+
+# ── Engagement dashboard ──────────────────────────────────────────────────────
+with tab_engagement:
+    st.markdown("### Researcher Engagement Dashboard")
+    st.markdown(
+        "This dashboard tracks your engagement with the analytical process — "
+        "a self-audit to ensure the human researcher remains the interpretive authority."
+    )
+
+    stats = get_engagement_stats(db_path, project_id)
+
+    # Warnings
+    for w in stats["warnings"]:
+        st.warning(w)
+
+    # Key metrics row
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Memos", stats["total_memos"])
+    col2.metric("Flags Raised", stats["total_flags"])
+    col3.metric("Flags Resolved", stats["resolved_flags"])
+    col4.metric("Blind Assessments", stats["blind_assessed"])
+
+    st.divider()
+
+    # Memo breakdown
+    st.markdown("#### Memos by Type")
+    if stats["memo_counts"]:
+        import pandas as pd
+        memo_df = pd.DataFrame([
+            {"Type": k.replace("_", " ").title(), "Count": v}
+            for k, v in sorted(stats["memo_counts"].items())
+        ])
+        st.dataframe(memo_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No memos written yet.")
+
+    # Flag resolution
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        st.markdown("#### Flag Resolution")
+        open_flags = stats["total_flags"] - stats["resolved_flags"] - stats["deferred_flags"]
+        st.write(f"- **Open:** {open_flags}")
+        st.write(f"- **Resolved:** {stats['resolved_flags']}")
+        st.write(f"- **Deferred:** {stats['deferred_flags']}")
+
+    with col_f2:
+        st.markdown("#### Human Coding")
+        pct = (stats["sup_assignments"] / stats["total_segments"] * 100) if stats["total_segments"] else 0
+        st.write(f"- **Segments human-coded:** {stats['sup_assignments']} / {stats['total_segments']} ({pct:.1f}%)")
+
+    # Codebook review stats
+    if stats["review_stats"]:
+        st.divider()
+        st.markdown("#### Codebook Review")
+        rs = stats["review_stats"]
+        cr1, cr2, cr3, cr4 = st.columns(4)
+        cr1.metric("Accepted Verbatim", rs.get("accepted_verbatim", 0))
+        cr2.metric("Edited", rs.get("edited", 0))
+        cr3.metric("Rejected", rs.get("rejected", 0))
+        cr4.metric("Added Manually", rs.get("added_manually", 0))
+
+    # Calibration history
+    if stats["calibration_runs"]:
+        st.divider()
+        st.markdown("#### Calibration History")
+        cal_df = pd.DataFrame([{
+            "Run": r["id"],
+            "Date": (r.get("computed_at") or r.get("created_at") or "")[:16],
+            "α": f"{r['krippendorff_alpha']:.3f}" if r.get("krippendorff_alpha") is not None else "—",
+            "Segments": r.get("segment_count", "—"),
+        } for r in stats["calibration_runs"]])
+        st.dataframe(cal_df, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.caption(
+        "This dashboard is inspired by qualitative research integrity frameworks. "
+        "Green metrics indicate good researcher engagement; warnings highlight areas "
+        "where more human involvement is recommended."
+    )

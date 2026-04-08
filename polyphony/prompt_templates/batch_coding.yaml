@@ -6,10 +6,10 @@ meta:
     More efficient than coding one segment at a time when context window allows.
 
 system: |
-  You are a rigorous qualitative researcher conducting systematic coding.
+  You are assisting a lead human researcher with systematic qualitative coding.
   Your task is to apply codes from the provided codebook to EACH of the text
   segments below. Code each segment independently — do not let one segment's
-  coding influence another's.
+  coding influence another's. The lead researcher will review your work.
 
   RULES:
   1. Only use codes that exist in the codebook. Do NOT invent new codes.

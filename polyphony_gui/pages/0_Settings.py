@@ -160,6 +160,113 @@ def _render_current_coder_config():
                 st.info("No changes detected.")
 
 
+def _render_coder_cards():
+    """Render coder card editors for all agents in the active project."""
+    from polyphony_gui.db import get_agent_with_metadata, save_agent_metadata
+
+    db_path = st.session_state.get("active_project_db")
+    if not db_path:
+        return
+
+    from pathlib import Path
+    from polyphony.db import connect, fetchone
+
+    conn = connect(Path(db_path))
+    project = fetchone(conn, "SELECT * FROM project WHERE id = 1")
+    conn.close()
+    if not project:
+        return
+
+    st.divider()
+    st.markdown("### 📋 Coder Cards (Positionality & Transparency)")
+    st.markdown(
+        "Coder cards document **who** (or what) is doing the coding — "
+        "positionality for humans, capability statements for AI. "
+        "These are included in replication packages for transparency."
+    )
+
+    roles = [("supervisor", "Supervisor (You)"), ("coder_a", "Coder A"), ("coder_b", "Coder B")]
+
+    for role, label in roles:
+        agent = get_agent_with_metadata(db_path, project["id"], role)
+        if not agent:
+            continue
+
+        meta = agent["_metadata"]
+        is_human = agent["agent_type"] == "human"
+
+        with st.expander(f"**{label}** — {agent['model_name']}", expanded=False):
+            if is_human:
+                with st.form(f"coder_card_{role}"):
+                    pos = st.text_area(
+                        "Positionality statement",
+                        value=meta.get("positionality_statement", ""),
+                        placeholder="Describe your relationship to the research topic, relevant identities, and potential biases.",
+                        height=100,
+                        key=f"cc_pos_{role}",
+                    )
+                    disc = st.text_input(
+                        "Disciplinary background",
+                        value=meta.get("disciplinary_background", ""),
+                        placeholder="e.g. Political science, computational social science",
+                        key=f"cc_disc_{role}",
+                    )
+                    rel = st.text_area(
+                        "Relationship to data",
+                        value=meta.get("relationship_to_data", ""),
+                        placeholder="How did you come to this data? Prior exposure? Involvement in data collection?",
+                        height=80,
+                        key=f"cc_rel_{role}",
+                    )
+                    proj_role = st.text_input(
+                        "Project role description",
+                        value=meta.get("project_role_description", ""),
+                        placeholder="e.g. Principal investigator and sole human coder",
+                        key=f"cc_prole_{role}",
+                    )
+                    save_btn = st.form_submit_button("Save Coder Card", type="primary")
+
+                if save_btn:
+                    meta["positionality_statement"] = pos.strip()
+                    meta["disciplinary_background"] = disc.strip()
+                    meta["relationship_to_data"] = rel.strip()
+                    meta["project_role_description"] = proj_role.strip()
+                    save_agent_metadata(db_path, agent["id"], meta)
+                    st.success(f"Coder card saved for {label}.")
+                    st.rerun()
+            else:
+                with st.form(f"coder_card_{role}"):
+                    persona = st.text_area(
+                        "Persona description",
+                        value=meta.get("persona_description", ""),
+                        placeholder="Describe the AI coder's analytical persona or instructions.",
+                        height=80,
+                        key=f"cc_persona_{role}",
+                    )
+                    cutoff = st.text_input(
+                        "Training data cutoff",
+                        value=meta.get("training_cutoff", ""),
+                        placeholder="e.g. April 2024",
+                        key=f"cc_cutoff_{role}",
+                    )
+                    limitations = st.text_area(
+                        "Known limitations",
+                        value=meta.get("known_limitations", ""),
+                        placeholder="e.g. May over-code sentiment, lacks domain expertise in X",
+                        height=80,
+                        key=f"cc_limits_{role}",
+                    )
+                    save_btn = st.form_submit_button("Save Coder Card", type="primary")
+
+                if save_btn:
+                    meta["persona_description"] = persona.strip()
+                    meta["training_cutoff"] = cutoff.strip()
+                    meta["known_limitations"] = limitations.strip()
+                    save_agent_metadata(db_path, agent["id"], meta)
+                    st.success(f"Coder card saved for {label}.")
+                    st.rerun()
+
+
 def _model_selector(key_prefix: str, provider: str, current_model: str) -> str:
     """Render a model selector widget for the given provider. Returns selected model name."""
     if provider == "ollama":
@@ -395,6 +502,9 @@ with tab_setup:
 
     # ── Current project coder configuration (always shown if project active) ──
     _render_current_coder_config()
+
+    # ── Coder Cards ────────────────────────────────────────────────────────
+    _render_coder_cards()
 
 # ── Provider Status ───────────────────────────────────────────────────────────
 with tab_providers:

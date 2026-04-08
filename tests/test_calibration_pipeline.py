@@ -108,6 +108,7 @@ def test_run_calibration_two_way_threshold_met(conn, project_id, document_id, co
         calibration_sample_size=3,
         max_rounds=1,
         include_supervisor=False,
+        skip_memo_gate=True,
     )
 
     assert "krippendorff_alpha" in results
@@ -137,6 +138,7 @@ def test_run_calibration_three_way_records_threeway_metrics(
         max_rounds=1,
         include_supervisor=True,
         supervisor_agent=supervisor,
+        skip_memo_gate=True,
     )
 
     assert "krippendorff_alpha_3way" in results
@@ -183,6 +185,7 @@ def test_run_calibration_below_threshold_allows_manual_stop(
     monkeypatch.setattr("polyphony.pipeline.calibration.run_coding_session", fake_run_coding_session)
     monkeypatch.setattr("polyphony.pipeline.calibration.compute_irr", fake_compute_irr)
     monkeypatch.setattr("polyphony.pipeline.calibration.Confirm.ask", lambda *a, **k: False)
+    monkeypatch.setattr("polyphony.pipeline.calibration.Prompt.ask", lambda *a, **k: "Test rationale")
 
     results = run_calibration(
         conn=conn,
@@ -194,6 +197,7 @@ def test_run_calibration_below_threshold_allows_manual_stop(
         calibration_sample_size=3,
         max_rounds=1,
         include_supervisor=False,
+        skip_memo_gate=True,
     )
 
     assert results["krippendorff_alpha"] == 0.1
@@ -233,6 +237,7 @@ def test_run_calibration_parallel_uses_separate_threads(
         calibration_sample_size=3,
         max_rounds=1,
         include_supervisor=False,
+        skip_memo_gate=True,
     )
 
     # Both agents should have run (2 coding sessions)

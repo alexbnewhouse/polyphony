@@ -263,11 +263,56 @@ with tab_replication:
 - 🔍 IRR results and disagreement log
 - 📝 Analytical memos
 - 🤖 Full LLM call log (every prompt and response)
-- ✅ Verification scripts to reproduce key statistics
+- 📋 Coder Cards (positionality & capability statements)
+- ✅ Research Integrity Checklist
+- ✔️ Verification scripts to reproduce key statistics
 - 📋 README with methodology description
 """)
 
-    if st.button("Generate Replication Package", type="primary", use_container_width=True):
+    # ── Reflexivity memo gate ──
+    from polyphony_gui.db import has_memo_of_type, add_memo
+
+    has_reflexivity = has_memo_of_type(db_path, project_id, "reflexivity")
+
+    if not has_reflexivity:
+        st.warning(
+            "**Memo gate:** A reflexivity statement is required before generating "
+            "the replication package. This documents your relationship to the data "
+            "and potential biases."
+        )
+        with st.form("reflexivity_memo_gate"):
+            reflexivity_content = st.text_area(
+                "Reflexivity Statement",
+                placeholder=(
+                    "Describe your positionality relative to this research. "
+                    "What biases might you bring? How did your perspective "
+                    "influence coding decisions?"
+                ),
+                height=120,
+            )
+            save_refl_btn = st.form_submit_button("Save Reflexivity Statement", type="primary")
+
+        if save_refl_btn:
+            if not reflexivity_content.strip():
+                st.error("Please write a reflexivity statement.")
+            else:
+                add_memo(
+                    db_path, project_id,
+                    "Reflexivity Statement",
+                    reflexivity_content.strip(),
+                    memo_type="reflexivity",
+                )
+                st.success("Reflexivity statement saved.")
+                st.rerun()
+
+    can_generate = has_reflexivity or has_memo_of_type(db_path, project_id, "reflexivity")
+
+    if st.button(
+        "Generate Replication Package",
+        type="primary",
+        use_container_width=True,
+        disabled=not can_generate,
+    ):
         with st.spinner("Building replication package… this may take a moment."):
             try:
                 from polyphony.db.connection import connect

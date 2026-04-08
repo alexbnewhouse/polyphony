@@ -25,6 +25,56 @@ optionally participate as a full third coder for 3-way inter-rater reliability.
 
 ---
 
+## Epistemological Scope and Limitations
+
+polyphony occupies a specific epistemological position. Understanding its boundaries
+helps researchers assess fit and report limitations honestly.
+
+### What polyphony can support
+
+polyphony is well-suited for **systematic, structured coding** approaches:
+
+- **Thematic analysis** (Braun & Clarke style reflexive TA, or codebook TA)
+- **Content analysis** (manifest or latent, with pre-defined or emergent codes)
+- **Grounded theory** (initial/open coding and focused coding stages)
+
+These share a common structure: data is segmented, codes are applied systematically,
+and inter-rater reliability provides a meaningful quality signal.
+
+### What polyphony cannot replace
+
+LLM coders are **pattern-matching engines with broad but shallow contextual knowledge**.
+They can recognise themes, apply codebook definitions, and flag ambiguity —
+but they cannot:
+
+- **Bring lived experience** to the analysis. Phenomenological and autoethnographic
+  approaches depend on the researcher's embodied understanding.
+- **Develop theoretical sensitivity** over time. A human researcher's interpretive
+  lens deepens through immersion; an LLM starts fresh each call.
+- **Exercise reflexivity**. The human researcher must own the reflexive layer —
+  polyphony provides structural nudges (memo gates, positionality prompts) but
+  the substance must come from you.
+- **Understand power dynamics** in researcher-participant relationships.
+  Sensitive topics (extremism, trauma, marginalised communities) require
+  human judgment about what codes mean in context.
+
+### The human authority principle
+
+polyphony is designed around a core principle: **the human leads, the LLMs assist**.
+This is enforced structurally, not just rhetorically:
+
+- Codebook induction defaults to human-leads mode
+- Commit-then-reveal patterns prevent anchoring on LLM outputs
+- Mandatory memo gates require reflection before key transitions
+- Coder Cards make the analytical team legible to reviewers
+- Engagement dashboards let you self-audit your involvement
+
+If you find yourself routinely accepting LLM suggestions without editing,
+skipping memo gates, or deferring to the majority LLM vote — polyphony's
+design is telling you to slow down and engage more deeply.
+
+---
+
 ## Practice Sandbox Workflow
 
 polyphony includes an offline-first `practice` workflow for training before live analysis.

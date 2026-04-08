@@ -35,8 +35,8 @@ def codebook():
               help="Number of segments to sample for induction")
 @click.option("--agent", type=click.Choice(["a", "b", "both"]), default="both",
               show_default=True, help="Which agent(s) run induction")
-@click.option("--human-leads", is_flag=True, default=False,
-              help="Human proposes codes first, then sees LLM suggestions")
+@click.option("--human-leads/--no-human-leads", default=True, show_default=True,
+              help="Human proposes codes first, then sees LLM suggestions (default: on)")
 @click.option("--skip-referee", is_flag=True, default=False,
               help="Skip the referee deduplication pass")
 @click.pass_context
@@ -44,15 +44,18 @@ def induce(ctx, sample_size, agent, human_leads, skip_referee):
     """
     Generate an initial codebook inductively from your data.
 
-    Each agent independently reads a random sample of segments and proposes
-    candidate codes. A referee model then reviews the merged list for
-    near-duplicates and overlaps before you do the final review.
+    By default, YOU propose codes first from a data sample, then the LLM
+    agents propose their own candidates. You review the merged list before
+    finalizing. Use --no-human-leads to let LLMs propose first.
+
+    A referee model then reviews the merged list for near-duplicates and
+    overlaps before you do the final review.
 
     \b
     Examples:
-        polyphony codebook induce                    # sample 20 segments
+        polyphony codebook induce                    # human proposes first (default)
         polyphony codebook induce --sample-size 50   # larger sample
-        polyphony codebook induce --human-leads      # human proposes codes first
+        polyphony codebook induce --no-human-leads   # LLM-only induction
         polyphony codebook induce --skip-referee     # skip dedup pass
     """
     db_path = ctx.obj.get("db_path")

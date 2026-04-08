@@ -171,6 +171,13 @@ with tab_induce:
                 help=f"Number of segments the AI will analyze to suggest codes. "
                      f"Your corpus has {total_segments} total segments.",
             )
+        human_leads = st.checkbox(
+            "Human proposes codes first (recommended)",
+            value=True,
+            help="Browse a sample of segments and propose your own codes BEFORE "
+                 "the AI runs induction. This ensures the codebook reflects your "
+                 "analytical vision rather than deferring to the AI.",
+        )
         skip_coder_b = st.checkbox(
             "Use only one AI coder for induction (faster)",
             value=False,
@@ -206,6 +213,21 @@ with tab_induce:
                 )
             else:
                 st.write(f"Sampled **{len(segments)}** segments from {n_docs_sampled} document(s).")
+
+        # Human-leads: show segments and collect human codes first
+        if human_leads:
+            st.session_state["induction_segments"] = segments
+            st.session_state["induction_human_leads"] = True
+            st.session_state["induction_settings"] = {
+                "skip_coder_b": skip_coder_b,
+                "run_referee": run_referee,
+                "sample_size": sample_size,
+            }
+            conn.close()
+            st.rerun()
+
+        # Direct AI induction (no human-leads)
+        st.session_state.pop("induction_human_leads", None)
 
         # Create placeholder codebook for induction run
         cb_existing = db_fetchone(
@@ -286,6 +308,159 @@ with tab_induce:
         st.session_state["induction_candidates"] = merged
         st.session_state["induction_dup_groups"] = dup_groups
         st.session_state["induction_referee_summary"] = referee_summary
+
+    # ── Human-leads: segment browser + code proposal ──────────────────────
+    if st.session_state.get("induction_human_leads") and "induction_segments" in st.session_state:
+        segments_for_review = st.session_state["induction_segments"]
+        st.divider()
+        st.markdown("### Step 1: Propose Your Own Codes")
+        st.markdown(
+            "Browse the sampled segments below and propose codes based on what you observe. "
+            "Your codes will be merged with the AI suggestions to ensure the codebook "
+            "reflects your analytical vision."
+        )
+
+        with st.expander(f"📄 Browse sampled segments ({len(segments_for_review)} total)", expanded=True):
+            for seg in segments_for_review[:20]:
+                text = seg.get("text", "")
+                with st.container(border=True):
+                    st.caption(f"Segment {seg.get('id', '?')} — Doc {seg.get('document_id', '?')}")
+                    st.markdown(text[:500] + ("…" if len(text) > 500 else ""))
+
+        st.markdown("#### Your Proposed Codes")
+        st.markdown(
+            "Enter codes you noticed in the data. These will be included alongside "
+            "the AI-generated suggestions for your review."
+        )
+
+        n_human_codes = st.number_input(
+            "Number of codes to propose",
+            min_value=1, max_value=20, value=3,
+            key="human_leads_n_codes",
+        )
+
+        human_codes = []
+        for i in range(int(n_human_codes)):
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                name = st.text_input(f"Code {i+1} name", key=f"hl_name_{i}")
+            with col2:
+                desc = st.text_input(f"Code {i+1} description", key=f"hl_desc_{i}")
+            if name.strip():
+                human_codes.append({
+                    "name": name.strip(),
+                    "description": desc.strip(),
+                    "inclusion_criteria": "",
+                    "exclusion_criteria": "",
+                    "level": "open",
+                    "example_quotes": [],
+                    "_source": "human",
+                })
+
+        if st.button("Continue to AI Induction", type="primary", key="hl_continue"):
+            st.session_state["human_proposed_codes"] = human_codes
+            st.session_state.pop("induction_human_leads", None)
+
+            # Now run AI induction with the stored segments
+            settings = st.session_state.get("induction_settings", {})
+            from polyphony.db.connection import connect, fetchone as db_fetchone, insert as db_insert2
+            from polyphony.utils import build_agent_objects
+            from polyphony.pipeline.induction import (
+                run_agent_induction,
+                merge_candidates,
+            )
+
+            conn = connect(Path(db_path))
+            project_row = db_fetchone(conn, "SELECT * FROM project WHERE id = ?", (project_id,))
+            agent_a, agent_b, _ = build_agent_objects(conn, project_id)
+            segments = st.session_state["induction_segments"]
+
+            cb_existing = db_fetchone(
+                conn,
+                "SELECT id FROM codebook_version WHERE project_id = ? ORDER BY version DESC LIMIT 1",
+                (project_id,),
+            )
+            if cb_existing:
+                cb_id = cb_existing["id"]
+            else:
+                cb_id = db_insert2(conn, "codebook_version", {
+                    "project_id": project_id,
+                    "version": 0,
+                    "stage": "draft",
+                    "rationale": "Placeholder for induction run",
+                })
+                conn.commit()
+
+            run_id_a = db_insert2(conn, "coding_run", {
+                "project_id": project_id,
+                "codebook_version_id": cb_id,
+                "agent_id": agent_a.agent_id,
+                "run_type": "induction",
+                "status": "running",
+                "started_at": None,
+                "segment_count": len(segments),
+            })
+            conn.commit()
+
+            with st.spinner("AI Coder A is analyzing segments…"):
+                try:
+                    candidates_a = run_agent_induction(agent_a, segments, project_row, run_id_a, conn)
+                    st.write(f"Coder A suggested **{len(candidates_a)}** codes.")
+                except Exception as e:
+                    st.error(safe_error_message(e, "Coder A induction"))
+                    conn.close()
+                    st.stop()
+
+            candidates_b = []
+            if not settings.get("skip_coder_b"):
+                run_id_b = db_insert2(conn, "coding_run", {
+                    "project_id": project_id,
+                    "codebook_version_id": cb_id,
+                    "agent_id": agent_b.agent_id,
+                    "run_type": "induction",
+                    "status": "running",
+                    "started_at": None,
+                    "segment_count": len(segments),
+                })
+                conn.commit()
+                with st.spinner("AI Coder B is analyzing segments…"):
+                    try:
+                        candidates_b = run_agent_induction(agent_b, segments, project_row, run_id_b, conn)
+                        st.write(f"Coder B suggested **{len(candidates_b)}** codes.")
+                    except Exception as e:
+                        st.warning(safe_error_message(e, "Coder B induction"))
+
+            merged = merge_candidates(candidates_a, candidates_b) if candidates_b else candidates_a
+
+            # Prepend human-proposed codes
+            all_candidates = human_codes + merged
+            st.success(
+                f"Generated **{len(merged)}** AI codes + **{len(human_codes)}** human-proposed codes "
+                f"= **{len(all_candidates)}** total candidates."
+            )
+
+            # Referee deduplication
+            referee_summary = ""
+            dup_groups = []
+            if settings.get("run_referee") and len(all_candidates) > 1:
+                from polyphony.pipeline.induction import referee_dedup_candidates, apply_referee_recommendations
+                ref_agent = agent_b if not settings.get("skip_coder_b") else agent_a
+                with st.spinner(f"Referee ({ref_agent.info}) is reviewing codes for duplicates…"):
+                    try:
+                        all_candidates, dup_groups, referee_summary = referee_dedup_candidates(
+                            ref_agent, all_candidates, project_row, conn,
+                        )
+                        all_candidates = apply_referee_recommendations(all_candidates, dup_groups, auto_apply=False)
+                    except Exception as e:
+                        st.warning(f"Referee pass failed: {safe_error_message(e, 'Referee')}. Continuing without dedup.")
+
+            conn.close()
+            st.session_state["induction_candidates"] = all_candidates
+            st.session_state["induction_dup_groups"] = dup_groups
+            st.session_state["induction_referee_summary"] = referee_summary
+            st.session_state.pop("induction_segments", None)
+            st.session_state.pop("induction_settings", None)
+            st.rerun()
 
     # Review candidates
     if "induction_candidates" in st.session_state and st.session_state["induction_candidates"]:

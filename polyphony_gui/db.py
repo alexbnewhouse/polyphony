@@ -373,3 +373,117 @@ def get_coding_runs(db_path: str | Path, project_id: int) -> list[dict]:
     )
     conn.close()
     return rows
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Engagement / human-authority helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def get_engagement_stats(db_path: str | Path, project_id: int) -> dict:
+    """Gather engagement metrics for the human-authority dashboard."""
+    conn = connect(Path(db_path))
+
+    # Memo counts by type
+    memo_rows = fetchall(
+        conn,
+        "SELECT memo_type, COUNT(*) AS n FROM memo WHERE project_id = ? GROUP BY memo_type",
+        (project_id,),
+    )
+    memo_counts = {r["memo_type"]: r["n"] for r in memo_rows}
+    total_memos = sum(memo_counts.values())
+
+    # Flag stats
+    total_flags = (fetchone(conn, "SELECT COUNT(*) AS n FROM flag WHERE project_id = ?", (project_id,)) or {}).get("n", 0)
+    resolved_flags = (fetchone(conn, "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND status = 'resolved'", (project_id,)) or {}).get("n", 0)
+    deferred_flags = (fetchone(conn, "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND status = 'deferred'", (project_id,)) or {}).get("n", 0)
+    blind_assessed = (fetchone(conn, "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND supervisor_blind_code IS NOT NULL", (project_id,)) or {}).get("n", 0)
+
+    # Total segments
+    total_segments = (fetchone(conn, "SELECT COUNT(*) AS n FROM segment WHERE project_id = ?", (project_id,)) or {}).get("n", 0)
+
+    # Supervisor coding count
+    sup_assignments = (fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM assignment a "
+        "JOIN coding_run r ON r.id = a.coding_run_id "
+        "JOIN agent ag ON ag.id = r.agent_id "
+        "WHERE r.project_id = ? AND ag.role = 'supervisor'",
+        (project_id,),
+    ) or {}).get("n", 0)
+
+    # Codebook review stats
+    latest_cb = fetchone(
+        conn,
+        "SELECT * FROM codebook_version WHERE project_id = ? ORDER BY version DESC LIMIT 1",
+        (project_id,),
+    )
+    review_stats = from_json(latest_cb.get("review_stats"), {}) if latest_cb else {}
+
+    # Calibration history
+    cal_runs = fetchall(
+        conn,
+        "SELECT * FROM irr_run WHERE project_id = ? AND scope = 'calibration' ORDER BY id",
+        (project_id,),
+    )
+
+    conn.close()
+
+    # Build warnings
+    warnings = []
+    if "reflexivity" not in memo_counts:
+        warnings.append("No reflexivity memo found — write one before exporting.")
+    if "methodological" not in memo_counts:
+        warnings.append("No methodological memos recorded.")
+    if total_flags > 0 and blind_assessed == 0:
+        warnings.append("No blind assessments recorded — try blind review mode when resolving flags.")
+    if sup_assignments == 0:
+        warnings.append("No human-coded segments — consider coding a sample yourself.")
+
+    return {
+        "memo_counts": memo_counts,
+        "total_memos": total_memos,
+        "total_flags": total_flags,
+        "resolved_flags": resolved_flags,
+        "deferred_flags": deferred_flags,
+        "blind_assessed": blind_assessed,
+        "total_segments": total_segments,
+        "sup_assignments": sup_assignments,
+        "review_stats": review_stats,
+        "calibration_runs": cal_runs,
+        "warnings": warnings,
+    }
+
+
+def has_memo_of_type(db_path: str | Path, project_id: int, memo_type: str) -> bool:
+    """Check if at least one memo of the given type exists."""
+    conn = connect(Path(db_path))
+    row = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM memo WHERE project_id = ? AND memo_type = ?",
+        (project_id, memo_type),
+    )
+    conn.close()
+    return bool(row and row["n"] > 0)
+
+
+def get_agent_with_metadata(db_path: str | Path, project_id: int, role: str) -> Optional[dict]:
+    """Return agent row with parsed metadata for a given role."""
+    conn = connect(Path(db_path))
+    agent = fetchone(
+        conn,
+        "SELECT * FROM agent WHERE project_id = ? AND role = ?",
+        (project_id, role),
+    )
+    conn.close()
+    if agent:
+        agent["_metadata"] = from_json(agent.get("metadata"), {})
+    return agent
+
+
+def save_agent_metadata(db_path: str | Path, agent_id: int, metadata: dict) -> None:
+    """Save updated metadata JSON for an agent."""
+    conn = connect(Path(db_path))
+    update(conn, "agent", {"metadata": json_col(metadata)}, "id = ?", (agent_id,))
+    conn.commit()
+    conn.close()

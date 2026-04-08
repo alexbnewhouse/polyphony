@@ -9,6 +9,7 @@ from .irr import IRRRun, IRRDisagreement
 from .flag import Flag, FlagType, FlagStatus, DiscussionTurn
 from .memo import Memo, MemoType
 from .llm import LLMCall
+from .coder_card import CoderCard
 
 __all__ = [
     "Project", "ProjectStatus", "Methodology",
@@ -20,4 +21,5 @@ __all__ = [
     "Flag", "FlagType", "FlagStatus", "DiscussionTurn",
     "Memo", "MemoType",
     "LLMCall",
+    "CoderCard",
 ]

@@ -12,7 +12,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
-from ..db import connect, fetchall, fetchone, insert, json_col, project_db_path, write_project_marker
+from ..db import connect, fetchall, fetchone, from_json, insert, json_col, project_db_path, update, write_project_marker
 from ..utils import slugify
 
 console = Console()
@@ -275,3 +275,97 @@ def status(ctx):
         f"  Memos:       {n_memos}",
         title="[bold cyan]Project Status[/]",
     ))
+
+
+@project.command("coder-card")
+@click.argument("role", type=click.Choice(["a", "b", "supervisor"]))
+@click.pass_context
+def coder_card(ctx, role):
+    """
+    Edit Coder Card metadata for an agent.
+
+    The Coder Card is a standardized document describing each coder (human
+    or LLM) for inclusion in the replication package. It makes the
+    epistemological asymmetry between human and LLM coders explicit.
+
+    \b
+    For LLM agents: persona description, known limitations, training cutoff.
+    For the human supervisor: positionality, disciplinary background,
+    relationship to the data.
+
+    \b
+    Examples:
+        polyphony project coder-card supervisor
+        polyphony project coder-card a
+    """
+    db_path = ctx.obj.get("db_path")
+    if not db_path:
+        console.print("[red]No active project.[/]")
+        sys.exit(1)
+
+    role_map = {"a": "coder_a", "b": "coder_b", "supervisor": "supervisor"}
+    db_role = role_map[role]
+
+    conn = connect(db_path)
+    p = fetchone(conn, "SELECT * FROM project ORDER BY id LIMIT 1")
+    agent = fetchone(
+        conn,
+        "SELECT * FROM agent WHERE project_id = ? AND role = ?",
+        (p["id"], db_role),
+    )
+    if not agent:
+        console.print(f"[red]No agent with role '{db_role}' found.[/]")
+        conn.close()
+        sys.exit(1)
+
+    metadata = from_json(agent.get("metadata"), {})
+
+    is_human = agent["agent_type"] == "human"
+
+    console.print(Panel(
+        f"[bold]Editing Coder Card for {db_role}[/]\n"
+        f"Type: {agent['agent_type']}\n"
+        f"Model: {agent['model_name'] or 'human'}\n\n"
+        "[dim]Press Enter to keep current value. Leave blank to clear.[/]",
+        title=f"[cyan]Coder Card: {db_role}[/]",
+    ))
+
+    if is_human:
+        metadata["positionality_statement"] = Prompt.ask(
+            "Positionality statement",
+            default=metadata.get("positionality_statement", ""),
+        ) or None
+        metadata["disciplinary_background"] = Prompt.ask(
+            "Disciplinary background",
+            default=metadata.get("disciplinary_background", ""),
+        ) or None
+        metadata["relationship_to_data"] = Prompt.ask(
+            "Relationship to data (insider/outsider/other)",
+            default=metadata.get("relationship_to_data", ""),
+        ) or None
+        metadata["project_role_description"] = Prompt.ask(
+            "Role description for this project",
+            default=metadata.get("project_role_description", ""),
+        ) or None
+    else:
+        metadata["persona_description"] = Prompt.ask(
+            "Persona/framing description (if any custom persona was applied)",
+            default=metadata.get("persona_description", ""),
+        ) or None
+        metadata["training_cutoff"] = Prompt.ask(
+            "Training data cutoff date (e.g. 'April 2024')",
+            default=metadata.get("training_cutoff", ""),
+        ) or None
+        metadata["known_limitations"] = Prompt.ask(
+            "Known limitations or biases",
+            default=metadata.get("known_limitations", ""),
+        ) or None
+
+    update(
+        conn, "agent",
+        {"metadata": json_col(metadata)},
+        "id = ?", (agent["id"],),
+    )
+    conn.commit()
+    conn.close()
+    console.print(f"[green]✓ Coder Card metadata saved for {db_role}.[/]")

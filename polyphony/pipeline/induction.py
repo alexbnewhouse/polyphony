@@ -383,17 +383,27 @@ def apply_referee_recommendations(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def human_review_candidates(candidates: List[dict], auto_accept_all: bool = False) -> List[dict]:
+def human_review_candidates(candidates: List[dict], auto_accept_all: bool = False) -> tuple:
     """
     Interactive terminal review of candidate codes.
     Supervisor can: accept (a), reject (r), rename (n), or edit description (e).
-    Returns the approved list of code dicts.
+    Returns (approved_list, review_stats_dict).
     """
+    review_stats = {
+        "total_candidates": len(candidates),
+        "accepted_verbatim": 0,
+        "edited": 0,
+        "rejected": 0,
+        "added_manually": 0,
+        "skipped_remaining": 0,
+    }
+
     if auto_accept_all:
         console.print(
             f"[yellow]Auto-accept enabled: approving all {len(candidates)} candidate codes without interactive review.[/]"
         )
-        return list(candidates)
+        review_stats["accepted_verbatim"] = len(candidates)
+        return list(candidates), review_stats
 
     console.print(
         Panel(
@@ -448,13 +458,17 @@ def human_review_candidates(candidates: List[dict], auto_accept_all: bool = Fals
 
         if choice == "s":
             # Accept all remaining
+            review_stats["skipped_remaining"] = len(candidates) - i
+            review_stats["accepted_verbatim"] += len(candidates) - i
             approved.extend(candidates[i:])
             break
         elif choice == "a":
             approved.append(code)
+            review_stats["accepted_verbatim"] += 1
             i += 1
         elif choice == "r":
             console.print(f"[red]Rejected: {code['name']}[/]")
+            review_stats["rejected"] += 1
             i += 1
         elif choice == "e":
             code["name"] = Prompt.ask("Code name", default=code["name"])
@@ -466,6 +480,7 @@ def human_review_candidates(candidates: List[dict], auto_accept_all: bool = Fals
                 "Exclude if (leave blank to skip)", default=code.get("exclusion_criteria", "")
             )
             approved.append(code)
+            review_stats["edited"] += 1
             i += 1
         elif choice == "n":
             new_code = {
@@ -477,6 +492,7 @@ def human_review_candidates(candidates: List[dict], auto_accept_all: bool = Fals
                 "level": "open",
             }
             approved.append(new_code)
+            review_stats["added_manually"] += 1
             # Don't advance i — continue reviewing existing candidates
 
     # Ask if supervisor wants to add more codes
@@ -490,8 +506,21 @@ def human_review_candidates(candidates: List[dict], auto_accept_all: bool = Fals
             "level": Prompt.ask("Level", choices=["open", "axial", "selective"], default="open"),
         }
         approved.append(new_code)
+        review_stats["added_manually"] += 1
 
-    return approved
+    # Display review summary
+    console.print(Panel(
+        f"[bold]Review Summary[/]\n"
+        f"  Candidates reviewed: {review_stats['total_candidates']}\n"
+        f"  Accepted verbatim:   {review_stats['accepted_verbatim']}\n"
+        f"  Edited:              {review_stats['edited']}\n"
+        f"  Rejected:            {review_stats['rejected']}\n"
+        f"  Added manually:      {review_stats['added_manually']}",
+        title="[cyan]Codebook Induction Review Stats[/]",
+        border_style="cyan",
+    ))
+
+    return approved, review_stats
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -713,7 +742,7 @@ def run_induction(
             console.print("  [dim]Continuing with unreviewed candidates.[/]")
 
     # Step 7: Human review
-    approved = human_review_candidates(all_candidates, auto_accept_all=auto_accept_all)
+    approved, review_stats = human_review_candidates(all_candidates, auto_accept_all=auto_accept_all)
     if not approved:
         raise ValueError("No codes were approved during induction.")
     console.print(f"\n[green]✓ {len(approved)} codes approved.[/]")
@@ -736,6 +765,13 @@ def run_induction(
         rationale=f"Induction from {len(segments)}-segment sample",
         created_by=None,  # Supervisor synthesized it
     )
+
+    # Save review stats on the codebook version
+    conn.execute(
+        "UPDATE codebook_version SET review_stats = ? WHERE id = ?",
+        (json_col(review_stats), cb_id),
+    )
+    conn.commit()
 
     # Advance project status
     conn.execute(

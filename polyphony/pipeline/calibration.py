@@ -48,6 +48,83 @@ console = Console()
 DEFAULT_IRR_THRESHOLD = 0.80
 
 
+def _check_memo_gate(conn, project_id, skip_memo_gate: bool) -> None:
+    """Require a methodological memo before advancing to coding phase."""
+    if skip_memo_gate:
+        return
+    existing = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM memo WHERE project_id = ? AND memo_type = 'methodological'",
+        (project_id,),
+    )
+    if existing and existing["n"] > 0:
+        return
+    console.print(Panel(
+        "[bold]Before proceeding to independent coding, please write a brief\n"
+        "methodological memo[/] explaining why you are satisfied with the\n"
+        "codebook and calibration results.\n\n"
+        "This memo will be included in your replication package and helps\n"
+        "document your analytical decision-making.\n\n"
+        "[dim]Tip: you can also write it later with "
+        "`polyphony memo new --type methodological --title '...'`[/]",
+        title="[cyan]Methodological Memo Required[/]",
+        border_style="cyan",
+    ))
+    import os, shlex, shutil, subprocess, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
+        f.write(
+            "# Calibration Decision Memo\n\n"
+            "<!-- Explain why you are satisfied with the codebook and calibration.\n"
+            "     Consider: What did disagreements reveal? Are code definitions clear?\n"
+            "     What refinements were made? -->\n\n"
+        )
+        tmp_path = f.name
+
+    _ALLOWED_EDITORS = {"nano", "vim", "vi", "nvim", "emacs", "code", "micro", "pico", "ee"}
+    editor = os.environ.get("EDITOR", "nano")
+    editor_parts = shlex.split(editor)
+    editor_basename = Path(editor_parts[0]).name
+    if editor_basename not in _ALLOWED_EDITORS:
+        console.print(
+            f"[yellow]Editor '{editor_basename}' not in allow-list. Using nano.[/]"
+        )
+        editor_parts = ["nano"]
+        editor_basename = "nano"
+    editor_bin = shutil.which(editor_parts[0])
+    if editor_bin:
+        subprocess.run([editor_bin, *editor_parts[1:], tmp_path], check=True)
+        content = Path(tmp_path).read_text().strip()
+        Path(tmp_path).unlink(missing_ok=True)
+        # Check if content is more than just the template
+        if content and not content.replace("# Calibration Decision Memo", "").strip().startswith("<!--"):
+            sup = fetchone(
+                conn,
+                "SELECT id FROM agent WHERE project_id = ? AND role = 'supervisor'",
+                (project_id,),
+            )
+            insert(conn, "memo", {
+                "project_id": project_id,
+                "author_id": sup["id"] if sup else 1,
+                "memo_type": "methodological",
+                "title": "Calibration Decision Memo",
+                "content": content,
+                "linked_codes": "[]",
+                "linked_segments": "[]",
+                "linked_flags": "[]",
+                "tags": json_col(["calibration", "auto-gate"]),
+            })
+            conn.commit()
+            console.print("[green]✓ Methodological memo saved.[/]")
+        else:
+            console.print("[yellow]Empty memo — gate skipped. You can write one later.[/]")
+    else:
+        Path(tmp_path).unlink(missing_ok=True)
+        console.print(
+            "[yellow]No editor found — skipping memo gate. "
+            "Write one manually with `polyphony memo new --type methodological`.[/]"
+        )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Mark calibration set
 # ─────────────────────────────────────────────────────────────────────────────
@@ -147,7 +224,29 @@ def discuss_disagreement(
         console.print(Panel(segment["text"], title=f"[cyan]Segment {segment['id']}[/]"))
         seg_text = segment["text"]
 
-    console.print(f"  Agent A coded: [green]{', '.join(codes_a) or '(nothing)'}[/]")
+    # ── Commit-then-reveal: ask human to code blind before showing agent work ──
+    console.print(
+        "\n[bold]Before seeing the agents' codes, how would you code this segment?[/]"
+    )
+    blind_code = Prompt.ask(
+        "Your code(s) (comma-separated, or 'skip' to skip)",
+        default="skip",
+    )
+    if blind_code.strip().lower() != "skip":
+        console.print(f"  [dim]Recorded your blind assessment: {blind_code}[/]")
+    else:
+        blind_code = None
+
+    # Save blind code to flag if we have a flag_id
+    if flag_id is not None and blind_code:
+        conn.execute(
+            "UPDATE flag SET supervisor_blind_code = ? WHERE id = ?",
+            (blind_code, flag_id),
+        )
+        conn.commit()
+
+    # Now reveal agent codes
+    console.print(f"\n  Agent A coded: [green]{', '.join(codes_a) or '(nothing)'}[/]")
     console.print(f"  Agent B coded: [yellow]{', '.join(codes_b) or '(nothing)'}[/]")
     if codes_c is not None:
         console.print(f"  Supervisor coded: [cyan]{', '.join(codes_c) or '(nothing)'}[/]")
@@ -239,6 +338,7 @@ def run_calibration(
     include_supervisor: bool = False,
     supervisor_agent=None,
     batch: bool = False,
+    skip_memo_gate: bool = False,
 ) -> dict:
     """
     Run calibration round(s) until IRR threshold is met or max_rounds reached.
@@ -320,6 +420,7 @@ def run_calibration(
                 f"\n[green]✓ IRR threshold met (α={alpha:.3f} ≥ {irr_threshold}).[/]\n"
                 "Proceeding to full independent coding."
             )
+            _check_memo_gate(conn, project_id, skip_memo_gate)
             conn.execute(
                 "UPDATE project SET status='coding', updated_at=datetime('now') WHERE id=?",
                 (project_id,),
@@ -332,6 +433,28 @@ def run_calibration(
         )
 
         if not Confirm.ask("Review disagreements and refine codebook?", default=True):
+            # Require rationale for proceeding below threshold
+            rationale = Prompt.ask(
+                "[yellow]Please explain why you're proceeding despite alpha below threshold[/]",
+                default="Researcher judgment: codebook is adequate for this study.",
+            )
+            sup = fetchone(
+                conn,
+                "SELECT id FROM agent WHERE project_id = ? AND role = 'supervisor'",
+                (project_id,),
+            )
+            insert(conn, "memo", {
+                "project_id": project_id,
+                "author_id": sup["id"] if sup else 1,
+                "memo_type": "methodological",
+                "title": f"Proceeding below IRR threshold (round {round_num}, α={alpha:.3f})",
+                "content": rationale,
+                "linked_codes": "[]",
+                "linked_segments": "[]",
+                "linked_flags": "[]",
+                "tags": json_col(["calibration", "low-alpha-override"]),
+            })
+            conn.commit()
             break
 
         # Review disagreements
@@ -403,11 +526,34 @@ def run_calibration(
                 "definitions with `polyphony codebook edit <code-name>`.[/]"
             )
             if not Confirm.ask("Run another calibration round?", default=True):
+                # Require rationale for stopping calibration early
+                rationale = Prompt.ask(
+                    "[yellow]Please explain why you're stopping calibration[/]",
+                    default="Researcher judgment: further calibration unlikely to improve agreement.",
+                )
+                sup = fetchone(
+                    conn,
+                    "SELECT id FROM agent WHERE project_id = ? AND role = 'supervisor'",
+                    (project_id,),
+                )
+                insert(conn, "memo", {
+                    "project_id": project_id,
+                    "author_id": sup["id"] if sup else 1,
+                    "memo_type": "methodological",
+                    "title": f"Calibration stopped early (round {round_num}, α={alpha:.3f})",
+                    "content": rationale,
+                    "linked_codes": "[]",
+                    "linked_segments": "[]",
+                    "linked_flags": "[]",
+                    "tags": json_col(["calibration", "early-stop"]),
+                })
+                conn.commit()
                 break
 
     console.print(
         "\n[yellow]Max calibration rounds reached. Proceeding with current codebook.[/]"
     )
+    _check_memo_gate(conn, project_id, skip_memo_gate)
     conn.execute(
         "UPDATE project SET status='coding', updated_at=datetime('now') WHERE id=?",
         (project_id,),

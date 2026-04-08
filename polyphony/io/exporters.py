@@ -31,6 +31,227 @@ console = Console()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Coder Card generation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _generate_coder_cards(
+    conn: sqlite3.Connection,
+    project_id: int,
+    output_dir: Path,
+) -> list:
+    """Generate Coder Card YAML files for each agent. Returns list of card dicts."""
+    agents = fetchall(conn, "SELECT * FROM agent WHERE project_id = ?", (project_id,))
+    cards_dir = output_dir / "coder_cards"
+    cards_dir.mkdir(exist_ok=True)
+
+    cards = []
+    for agent in agents:
+        metadata = from_json(agent.get("metadata"), {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        # Determine pipeline roles from coding_run records
+        runs = fetchall(
+            conn,
+            "SELECT DISTINCT run_type FROM coding_run WHERE agent_id = ?",
+            (agent["id"],),
+        )
+        pipeline_roles = sorted(set(r["run_type"] for r in runs))
+
+        # Get the system prompt actually used (from most recent llm_call)
+        last_call = fetchone(
+            conn,
+            "SELECT system_prompt FROM llm_call WHERE agent_id = ? ORDER BY called_at DESC LIMIT 1",
+            (agent["id"],),
+        )
+        system_prompt_used = last_call["system_prompt"] if last_call else agent.get("system_prompt")
+
+        # For human supervisors, try to pull positionality from reflexivity memo
+        positionality = metadata.get("positionality_statement")
+        if agent["agent_type"] == "human" and not positionality:
+            memo = fetchone(
+                conn,
+                "SELECT content FROM memo WHERE project_id = ? AND memo_type = 'reflexivity' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (project_id,),
+            )
+            if memo:
+                positionality = memo["content"]
+
+        is_human = agent["agent_type"] == "human"
+
+        card = {
+            "role": agent["role"],
+            "agent_type": agent["agent_type"],
+        }
+
+        if is_human:
+            card.update({
+                "positionality_statement": positionality,
+                "disciplinary_background": metadata.get("disciplinary_background"),
+                "relationship_to_data": metadata.get("relationship_to_data"),
+                "project_role_description": metadata.get("project_role_description"),
+                "pipeline_roles": pipeline_roles,
+            })
+        else:
+            card.update({
+                "model_name": agent["model_name"],
+                "model_version": agent["model_version"],
+                "provider": agent["agent_type"],
+                "temperature": agent["temperature"],
+                "seed": agent["seed"],
+                "system_prompt_used": system_prompt_used,
+                "persona_description": metadata.get("persona_description"),
+                "training_cutoff": metadata.get("training_cutoff"),
+                "known_limitations": metadata.get("known_limitations"),
+                "pipeline_roles": pipeline_roles,
+            })
+
+        # Remove None values for cleaner YAML
+        card = {k: v for k, v in card.items() if v is not None}
+
+        fname = cards_dir / f"coder_card_{agent['role']}.yaml"
+        fname.write_text(
+            yaml.dump(card, allow_unicode=True, sort_keys=False, default_flow_style=False),
+            encoding="utf-8",
+        )
+        cards.append(card)
+
+    console.print(f"  coder_cards/: {len(cards)} card(s) generated")
+    return cards
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Research integrity checklist
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _generate_integrity_checklist(
+    conn: sqlite3.Connection,
+    project_id: int,
+    output_dir: Path,
+) -> dict:
+    """Generate a research integrity checklist YAML for the replication package."""
+
+    # Memo counts by type
+    memo_counts = {}
+    for row in fetchall(
+        conn,
+        "SELECT memo_type, COUNT(*) AS n FROM memo WHERE project_id = ? GROUP BY memo_type",
+        (project_id,),
+    ):
+        memo_counts[row["memo_type"]] = row["n"]
+
+    # Flag resolution stats
+    total_flags = fetchone(
+        conn, "SELECT COUNT(*) AS n FROM flag WHERE project_id = ?", (project_id,),
+    )["n"]
+    resolved_flags = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND status = 'resolved'",
+        (project_id,),
+    )["n"]
+    deferred_flags = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND status = 'deferred'",
+        (project_id,),
+    )["n"]
+    blind_coded_flags = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM flag WHERE project_id = ? AND supervisor_blind_code IS NOT NULL",
+        (project_id,),
+    )["n"]
+
+    # Human coding stats
+    sup_assignments = fetchone(
+        conn,
+        "SELECT COUNT(*) AS n FROM assignment a "
+        "JOIN agent ag ON ag.id = a.agent_id "
+        "JOIN coding_run r ON r.id = a.coding_run_id "
+        "WHERE r.project_id = ? AND ag.role = 'supervisor'",
+        (project_id,),
+    )["n"]
+    total_segments = fetchone(
+        conn, "SELECT COUNT(*) AS n FROM segment WHERE project_id = ?", (project_id,),
+    )["n"]
+
+    # Codebook induction review stats
+    latest_cb = fetchone(
+        conn,
+        "SELECT * FROM codebook_version WHERE project_id = ? ORDER BY version DESC LIMIT 1",
+        (project_id,),
+    )
+    review_stats = from_json(latest_cb.get("review_stats"), {}) if latest_cb else {}
+
+    # Calibration history
+    cal_runs = fetchall(
+        conn,
+        "SELECT * FROM irr_run WHERE project_id = ? AND scope = 'calibration' ORDER BY computed_at",
+        (project_id,),
+    )
+    cal_rounds = len(cal_runs)
+    low_alpha_overrides = fetchall(
+        conn,
+        "SELECT COUNT(*) AS n FROM memo WHERE project_id = ? AND tags LIKE '%low-alpha-override%'",
+        (project_id,),
+    )
+    proceeded_below_threshold = low_alpha_overrides[0]["n"] > 0 if low_alpha_overrides else False
+
+    # Final IRR
+    final_irr = fetchone(
+        conn,
+        "SELECT * FROM irr_run WHERE project_id = ? ORDER BY computed_at DESC LIMIT 1",
+        (project_id,),
+    )
+
+    checklist = {
+        "human_engagement": {
+            "positionality_statement_written": memo_counts.get("reflexivity", 0) > 0,
+            "methodological_memos_count": memo_counts.get("methodological", 0),
+            "reflexivity_memos_count": memo_counts.get("reflexivity", 0),
+            "total_memos_count": sum(memo_counts.values()),
+            "flags_manually_resolved": resolved_flags,
+            "flags_total": total_flags,
+            "flags_deferred_as_ambiguous": deferred_flags,
+            "flags_with_blind_assessment": blind_coded_flags,
+            "segments_human_independently_coded": sup_assignments,
+            "segments_total": total_segments,
+            "codebook_induction": {
+                "human_led": review_stats.get("total_candidates", 0) > 0,
+                "codes_accepted_verbatim": review_stats.get("accepted_verbatim", 0),
+                "codes_edited": review_stats.get("edited", 0),
+                "codes_rejected": review_stats.get("rejected", 0),
+                "codes_added_manually": review_stats.get("added_manually", 0),
+            },
+            "calibration": {
+                "rounds_completed": cal_rounds,
+                "proceeded_below_threshold": proceeded_below_threshold,
+            },
+        },
+        "irr_summary": {
+            "final_krippendorff_alpha": final_irr.get("krippendorff_alpha") if final_irr else None,
+            "final_krippendorff_alpha_3way": final_irr.get("krippendorff_alpha_3way") if final_irr else None,
+            "final_cohen_kappa": final_irr.get("cohen_kappa") if final_irr else None,
+        },
+        "transparency": {
+            "all_llm_calls_logged": True,
+            "prompt_templates_included": True,
+            "full_codebook_history_included": True,
+            "coder_cards_included": True,
+        },
+    }
+
+    out_path = output_dir / "integrity_checklist.yaml"
+    out_path.write_text(
+        yaml.dump(checklist, allow_unicode=True, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
+    console.print(f"  integrity_checklist.yaml: generated")
+    return checklist
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Codebook export
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -402,10 +623,16 @@ def export_replication_package(
         shutil.copytree(prompts_src, prompts_dst, dirs_exist_ok=True)
         console.print(f"  prompts/: snapshot copied")
 
-    # ── 9. scripts/ ───────────────────────────────────────────────────────────
+    # ── 9. coder_cards/ ──────────────────────────────────────────────────────
+    coder_cards = _generate_coder_cards(conn, project_id, output_dir)
+
+    # ── 9b. integrity_checklist.yaml ─────────────────────────────────────────
+    integrity = _generate_integrity_checklist(conn, project_id, output_dir)
+
+    # ── 10. scripts/ ──────────────────────────────────────────────────────────
     _write_replication_scripts(output_dir / "scripts")
 
-    # ── 10. MANIFEST.json ─────────────────────────────────────────────────────
+    # ── 11. MANIFEST.json ─────────────────────────────────────────────────────
     from .. import __version__
     n_llm_calls = fetchone(conn, "SELECT COUNT(*) AS n FROM llm_call WHERE project_id = ?", (project_id,))["n"]
     final_irr = irr_runs[-1] if irr_runs else {}
@@ -447,6 +674,7 @@ def export_replication_package(
         )["n"] if latest_cb else 0,
         "memo_count": fetchone(conn, "SELECT COUNT(*) AS n FROM memo WHERE project_id = ?", (project_id,))["n"],
         "llm_call_count": n_llm_calls,
+        "coder_cards": {c["role"]: c.get("agent_type", "unknown") for c in coder_cards},
         "checksums": _compute_checksums(output_dir),
     }
 
@@ -642,6 +870,7 @@ Generated by polyphony v{manifest['polyphony_version']} on {manifest['export_dat
 | `memos/` | Analytical memos |
 | `llm_audit/` | Full LLM call log (JSONL) with prompts and responses |
 | `prompts/` | Prompt templates used |
+| `coder_cards/` | Coder Cards for each agent (human and LLM) |
 | `scripts/` | Verification and rerun utilities |
 
 ## Agents

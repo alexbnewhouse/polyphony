@@ -97,8 +97,9 @@ def test_human_review_candidates_auto_accept():
         {"name": "CODE_A", "description": "A", "level": "open"},
         {"name": "CODE_B", "description": "B", "level": "open"},
     ]
-    approved = human_review_candidates(candidates, auto_accept_all=True)
+    approved, review_stats = human_review_candidates(candidates, auto_accept_all=True)
     assert approved == candidates
+    assert review_stats["accepted_verbatim"] == 2
 
 
 # ─────────────────────────────────────────────────────────────────────────────

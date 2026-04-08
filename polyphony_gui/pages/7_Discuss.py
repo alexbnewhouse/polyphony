@@ -108,6 +108,16 @@ with tab_flags:
 
                 st.divider()
                 with st.form(f"resolve_flag_{flag['id']}"):
+                    resolution_mode = st.selectbox(
+                        "Resolution mode",
+                        options=["supervisor_override", "agent_facilitated", "deferred"],
+                        format_func=lambda x: {
+                            "supervisor_override": "Supervisor Override — decide directly",
+                            "agent_facilitated": "Agent Facilitated — agents explain, then you decide",
+                            "deferred": "Deferred — mark as genuinely ambiguous",
+                        }.get(x, x),
+                        key=f"mode_{flag['id']}",
+                    )
                     resolution = st.text_area(
                         "Your decision / resolution",
                         placeholder="e.g. 'Apply code X here because…' or 'This is not codeable.'",
@@ -117,10 +127,20 @@ with tab_flags:
                     resolve_btn = col_res.form_submit_button("Resolve Flag", type="primary")
                     note_btn = col_memo.form_submit_button("Add Note")
 
-                if resolve_btn and resolution.strip():
+                if resolve_btn and (resolution.strip() or resolution_mode == "deferred"):
                     if add_note_only:
                         _add_supervisor_flag_note(db_path, project_id, flag["id"], resolution.strip())
                         st.success("Note added.")
+                    elif resolution_mode == "deferred":
+                        from polyphony.db.connection import connect as _conn_defer
+                        c = _conn_defer(Path(db_path))
+                        c.execute(
+                            "UPDATE flag SET status = 'deferred', resolution = ?, resolved_at = datetime('now') WHERE id = ?",
+                            (resolution.strip() or "Deferred — genuinely ambiguous", flag["id"]),
+                        )
+                        c.commit()
+                        c.close()
+                        st.success("Flag deferred.")
                     else:
                         resolve_flag(db_path, flag["id"], resolution.strip())
                         st.success("Flag resolved.")
@@ -143,6 +163,24 @@ with tab_disagreements:
     st.markdown(
         "These segments were coded differently by Coder A and Coder B. "
         "Review each one and decide on the final code assignment."
+    )
+
+    blind_mode = st.checkbox(
+        "Blind review mode",
+        value=False,
+        help="Hide which coder is A and which is B. Labels are randomised per segment "
+             "so you evaluate each coding decision on its merits without knowing "
+             "which AI produced it.",
+    )
+    if blind_mode:
+        st.info("Blind review mode is active. Coder identities are hidden.")
+
+    # Blind gut-check: record your own code before seeing agent work
+    blind_gut_check = st.checkbox(
+        "Record my own codes first (commit-then-reveal)",
+        value=False,
+        help="For each disagreement, write your own code assignment BEFORE seeing "
+             "what the AI coders assigned. This prevents anchoring bias.",
     )
 
     from polyphony.db.connection import connect, fetchall as db_fetchall
@@ -224,25 +262,57 @@ with tab_disagreements:
                 asgn_b = asgn_b_by_seg.get(seg_id, [])
 
                 seg_txt = (seg["text"][:300] + "…") if seg and len(seg["text"]) > 300 else (seg["text"] if seg else "")
-                codes_a_str = ", ".join(a["name"] for a in asgn_a) or "(none)"
-                codes_b_str = ", ".join(b["name"] for b in asgn_b) or "(none)"
 
-                with st.expander(f"Segment {seg_id}: A={codes_a_str} | B={codes_b_str}"):
+                # Blind mode: randomise labels per segment using segment_id as seed
+                if blind_mode:
+                    import hashlib
+                    swap = int(hashlib.md5(str(seg_id).encode()).hexdigest(), 16) % 2 == 0
+                    if swap:
+                        display_a, display_b = asgn_b, asgn_a
+                    else:
+                        display_a, display_b = asgn_a, asgn_b
+                    label_1, label_2 = "Coder 1", "Coder 2"
+                else:
+                    display_a, display_b = asgn_a, asgn_b
+                    label_1, label_2 = "Coder A", "Coder B"
+
+                codes_1_str = ", ".join(a["name"] for a in display_a) or "(none)"
+                codes_2_str = ", ".join(b["name"] for b in display_b) or "(none)"
+
+                with st.expander(f"Segment {seg_id}: {label_1}={codes_1_str} | {label_2}={codes_2_str}"):
                     st.markdown(f"> {seg_txt}")
+
+                    # Commit-then-reveal: gut-check input
+                    if blind_gut_check:
+                        gut_key = f"gut_{seg_id}"
+                        if gut_key not in st.session_state:
+                            gut_code = st.text_input(
+                                "Your code(s) before seeing agent work (comma-separated)",
+                                key=f"gut_input_{seg_id}",
+                                placeholder="e.g. HOUSING_INSECURITY, COPING_STRATEGY",
+                            )
+                            if st.button("Commit my codes", key=f"gut_commit_{seg_id}"):
+                                st.session_state[gut_key] = gut_code
+                                st.rerun()
+                            st.caption("Commit your codes to reveal how the AI coders coded this segment.")
+                            continue
+                        else:
+                            st.success(f"Your blind assessment: **{st.session_state[gut_key]}**")
+
                     st.divider()
                     col_a, col_b = st.columns(2)
 
                     with col_a:
-                        st.markdown("**Coder A:**")
-                        for a in asgn_a:
+                        st.markdown(f"**{label_1}:**")
+                        for a in display_a:
                             conf = f" *(conf: {a['confidence']:.2f})*" if a.get("confidence") else ""
                             st.markdown(f"- `{a['name']}`{conf}")
                             if a.get("rationale"):
                                 st.caption(a["rationale"])
 
                     with col_b:
-                        st.markdown("**Coder B:**")
-                        for b in asgn_b:
+                        st.markdown(f"**{label_2}:**")
+                        for b in display_b:
                             conf = f" *(conf: {b['confidence']:.2f})*" if b.get("confidence") else ""
                             st.markdown(f"- `{b['name']}`{conf}")
                             if b.get("rationale"):

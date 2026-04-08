@@ -276,6 +276,19 @@ def setup(ctx, json_output: bool) -> None:
         for i, step in enumerate(result.setup_steps, 1):
             console.print(f"  {i}. {escape(step)}")
 
+    # ── Scope reminder ───────────────────────────────────────────────
+    console.print()
+    console.print(Panel(
+        "[bold]Remember:[/] polyphony is designed so [bold]you[/] are the lead researcher.\n"
+        "The LLM coders are your assistants — not your co-PIs. Every codebook\n"
+        "decision, flag resolution, and interpretation should flow through you.\n\n"
+        "[dim]By default, codebook induction starts with YOUR codes first (--human-leads).\n"
+        "Use `polyphony analyze engagement` to self-audit your involvement.\n"
+        "See METHODOLOGY.md for epistemological scope and limitations.[/]",
+        title="[bold cyan]Human Authority Principle[/]",
+        border_style="cyan",
+    ))
+
     # ── Quick-start suggestion ───────────────────────────────────────
     top = result.recommendations[0] if result.recommendations else None
     if top:
