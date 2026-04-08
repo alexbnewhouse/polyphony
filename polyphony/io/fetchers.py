@@ -180,10 +180,16 @@ def _fetch_page_html(page_url: str, timeout: int) -> str:
                 hop_host = urlparse(hop_url).hostname or ""
                 if hop_host and not _is_safe_host(hop_host):
                     raise urllib.error.URLError(f"Redirected to unsafe host: {hop_url}")
+        # Also verify the final resolved URL (belt-and-suspenders)
+        final_host = urlparse(resp.url).hostname or ""
+        if final_host and not _is_safe_host(final_host):
+            raise urllib.error.URLError(f"Redirected to unsafe host: {resp.url}")
         resp.raise_for_status()
         ct = resp.headers.get("Content-Type", "")
         if ct.startswith("image/"):
             raise _DirectImageContent()
+        if len(resp.content) > _MAX_PAGE_BYTES:
+            raise Exception(f"Page exceeds maximum size ({_MAX_PAGE_BYTES // (1024*1024)} MB)")
         return resp.text
     except _DirectImageContent:
         raise

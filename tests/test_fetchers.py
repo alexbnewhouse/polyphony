@@ -468,8 +468,8 @@ class TestFetchImagesWithPageScraper:
 
     def test_cloudscraper_ssrf_redirect_blocked(self):
         """cloudscraper redirect to a private IP must be blocked by SSRF check."""
+        _cs = pytest.importorskip("cloudscraper")
         import types
-        import cloudscraper as _cs
 
         # Fake response where history contains a redirect to 10.0.0.1 (private)
         fake_redirect = types.SimpleNamespace(

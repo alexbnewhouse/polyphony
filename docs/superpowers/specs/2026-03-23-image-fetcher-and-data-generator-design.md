@@ -78,7 +78,8 @@ CSV file → parse URLs → [optional: fetch page HTML → extract image URLs]
 
 ### Constraints
 
-- No new dependencies — uses only stdlib (`urllib.request`, `html.parser`, `concurrent.futures`)
+- Core scraping uses only stdlib (`urllib.request`, `html.parser`, `concurrent.futures`)
+- Optional dependency: `cloudscraper>=1.2` (for Cloudflare JS challenge bypass on sites like 4plebs). Install via `pip install -e ".[scraper]"`
 - Reuses existing `import_image()` / `import_documents()` for DB insertion
 
 ## Feature 2: Fake Data Generator
