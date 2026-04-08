@@ -783,7 +783,7 @@ def show_doc(ctx, doc_id, segments):
     "--timeout",
     default=30,
     show_default=True,
-    help="Download timeout in seconds per image",
+    help="Per-request timeout in seconds (applies to both page fetch and image download)",
 )
 @click.option(
     "--max-concurrent",
@@ -847,6 +847,14 @@ def fetch_images(ctx, csv_path, url_column, metadata_columns, timeout, max_concu
     console.print(f"[bold]Fetching images from[/] {csv_path}")
     extractor = PAGE_EXTRACTORS.get(scraper.lower()) if scraper else None
     if extractor:
+        try:
+            import cloudscraper as _cs  # noqa: F401
+        except ImportError:
+            console.print(
+                "[yellow]Warning:[/] [bold]cloudscraper[/] is not installed. "
+                "Without it, Cloudflare-protected sites (e.g. 4plebs) will return 403. "
+                "Install it with: [cyan]pip install -e '.\[scraper]'[/]"
+            )
         console.print(f"[dim]Scraper mode:[/] [cyan]{scraper}[/] — extracting images from page URLs")
     fetch_result = fetch_images_from_csv(
         csv_path=Path(csv_path),

@@ -121,6 +121,7 @@ ollama pull llama3.1:8b
 uv pip install -e ".[openai]"          # OpenAI / Azure OpenAI
 uv pip install -e ".[anthropic]"       # Anthropic (Claude)
 uv pip install -e ".[all-providers]"   # Both
+uv pip install -e ".[scraper]"         # cloudscraper (for Cloudflare-protected archive sites)
 ```
 
 > **WSL tip:** If `uv` is not found after installation, add `$HOME/.local/bin` to your `PATH`:
@@ -148,6 +149,7 @@ ollama pull llama3.1:8b
 pip install -e ".[openai]"          # OpenAI / Azure OpenAI
 pip install -e ".[anthropic]"       # Anthropic (Claude)
 pip install -e ".[all-providers]"   # Both
+pip install -e ".[scraper]"         # cloudscraper (for Cloudflare-protected archive sites)
 ```
 
 ### 2. Create a project
@@ -197,13 +199,11 @@ polyphony data import data.json
 # Images (requires a vision-capable model for coding)
 polyphony data import photos/*.jpg
 
-# Image URLs from CSV
-polyphony data import photos/*.jpg
-
 # Image URLs from CSV (direct links)
 polyphony data fetch-images image_urls.csv --url-column url
 
 # Images scraped from web pages (e.g. 4chan/4plebs archive threads)
+# Requires: pip install -e ".[scraper]"  (installs cloudscraper for Cloudflare bypass)
 polyphony data fetch-images threads.csv --url-column "4PLEBS POST" --scraper 4plebs
 
 # Generic page scraper (any <a href> / <img src> images)

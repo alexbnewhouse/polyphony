@@ -466,3 +466,30 @@ class TestFetchImagesWithPageScraper:
         assert len(result["failed"]) == 1
         assert "Unsupported scheme" in result["failed"][0]["error"]
 
+    def test_cloudscraper_ssrf_redirect_blocked(self):
+        """cloudscraper redirect to a private IP must be blocked by SSRF check."""
+        import types
+        import cloudscraper as _cs
+
+        # Fake response where history contains a redirect to 10.0.0.1 (private)
+        fake_redirect = types.SimpleNamespace(
+            headers={"Location": "http://10.0.0.1/secret"},
+            url="http://example.com/start",
+        )
+        fake_final = types.SimpleNamespace(
+            history=[fake_redirect],
+            headers={"Content-Type": "text/html"},
+            status_code=200,
+            text="<html></html>",
+        )
+        fake_final.raise_for_status = lambda: None
+
+        class _FakeSession:
+            def get(self, url, timeout=30):
+                return fake_final
+
+        from polyphony.io.fetchers import _fetch_page_html
+        with patch.object(_cs, "create_scraper", return_value=_FakeSession()):
+            with pytest.raises(Exception, match="unsafe host"):
+                _fetch_page_html("http://example.com/start", timeout=5)
+

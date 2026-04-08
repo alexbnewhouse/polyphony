@@ -172,12 +172,22 @@ def _fetch_page_html(page_url: str, timeout: int) -> str:
         import cloudscraper  # optional dep
         session = cloudscraper.create_scraper()
         resp = session.get(page_url, timeout=timeout)
+        # SSRF: verify every hop in the redirect chain stayed on a safe host.
+        # cloudscraper uses requests, which does not use our SafeRedirectHandler.
+        for r in resp.history:
+            hop_url = r.headers.get("Location", "")
+            if hop_url:
+                hop_host = urlparse(hop_url).hostname or ""
+                if hop_host and not _is_safe_host(hop_host):
+                    raise urllib.error.URLError(f"Redirected to unsafe host: {hop_url}")
         resp.raise_for_status()
         ct = resp.headers.get("Content-Type", "")
         if ct.startswith("image/"):
             raise _DirectImageContent()
         return resp.text
     except _DirectImageContent:
+        raise
+    except urllib.error.URLError:
         raise
     except ImportError:
         pass
@@ -272,6 +282,7 @@ def _download_one(
     )
     filename = _sanitize_filename(url)
     last_error: Optional[str] = None
+    data: bytes = b""
 
     for attempt in range(2):  # 1 retry
         try:
