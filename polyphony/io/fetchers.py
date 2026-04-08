@@ -30,6 +30,18 @@ _MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 # Maximum page size for HTML scraping (5 MB)
 _MAX_PAGE_BYTES = 5 * 1024 * 1024
 
+# Headers that mimic a real browser request. Many archive sites (including
+# 4plebs) return 403 for obvious bot user-agents.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 
 def _make_ssl_context() -> ssl.SSLContext:
     """Return an SSL context with verified certificates.
@@ -168,7 +180,7 @@ def _scrape_one_page(
         urllib.request.HTTPSHandler(context=_make_ssl_context()),
     )
     try:
-        req = urllib.request.Request(page_url, headers={"User-Agent": "polyphony-fetcher/1.0"})
+        req = urllib.request.Request(page_url, headers=_BROWSER_HEADERS)
         with opener.open(req, timeout=timeout) as resp:
             content_type = resp.headers.get("Content-Type", "")
             if content_type.startswith("image/"):
@@ -228,7 +240,7 @@ def _download_one(
 
     for attempt in range(2):  # 1 retry
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "polyphony-fetcher/1.0"})
+            req = urllib.request.Request(url, headers=_BROWSER_HEADERS)
             with opener.open(req, timeout=timeout) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 if not content_type.startswith("image/"):
