@@ -12,17 +12,6 @@ import streamlit as st
 logger = logging.getLogger("polyphony_gui")
 
 
-def launch() -> None:
-    """Entry point for the ``polyphony-gui`` console script."""
-    import sys
-
-    from streamlit.web.cli import main
-
-    sys.argv = ["streamlit", "run", str(Path(__file__).resolve()),
-                "--server.headless", "true"]
-    main()
-
-
 # ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Polyphony — Qualitative Analysis",

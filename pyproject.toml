@@ -82,7 +82,7 @@ dev = [
 
 [project.scripts]
 polyphony = "polyphony.cli.main:cli"
-polyphony-gui = "polyphony_gui.app:launch"
+polyphony-gui = "polyphony_gui._launcher:launch"
 
 [tool.setuptools.packages.find]
 where = ["."]
