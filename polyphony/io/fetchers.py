@@ -154,6 +154,50 @@ PAGE_EXTRACTORS: Dict[str, Callable[[str, str], List[str]]] = {
 }
 
 
+class _DirectImageContent(Exception):
+    """Raised by _fetch_page_html when the URL resolves to an image, not HTML."""
+
+
+def _fetch_page_html(page_url: str, timeout: int) -> str:
+    """Fetch an HTML page and return its decoded text.
+
+    Uses ``cloudscraper`` when available (handles Cloudflare JS challenges
+    transparently).  Falls back to ``urllib`` with browser-like headers for
+    sites that don't require JS challenge bypass.
+
+    Raises ``_DirectImageContent`` if the URL resolves to an image rather
+    than an HTML page.  Raises ``Exception`` on any other failure.
+    """
+    try:
+        import cloudscraper  # optional dep
+        session = cloudscraper.create_scraper()
+        resp = session.get(page_url, timeout=timeout)
+        resp.raise_for_status()
+        ct = resp.headers.get("Content-Type", "")
+        if ct.startswith("image/"):
+            raise _DirectImageContent()
+        return resp.text
+    except _DirectImageContent:
+        raise
+    except ImportError:
+        pass
+
+    # urllib fallback
+    opener = urllib.request.build_opener(
+        SafeRedirectHandler(),
+        urllib.request.HTTPSHandler(context=_make_ssl_context()),
+    )
+    req = urllib.request.Request(page_url, headers=_BROWSER_HEADERS)
+    with opener.open(req, timeout=timeout) as resp:
+        content_type = resp.headers.get("Content-Type", "")
+        if content_type.startswith("image/"):
+            raise _DirectImageContent()
+        charset_match = re.search(r"charset=([^\s;]+)", content_type)
+        charset = charset_match.group(1) if charset_match else "utf-8"
+        raw = resp.read(_MAX_PAGE_BYTES)
+    return raw.decode(charset, errors="replace")
+
+
 def _scrape_one_page(
     page_url: str,
     extractor: Callable[[str, str], List[str]],
@@ -175,21 +219,12 @@ def _scrape_one_page(
         return [{"status": "failed", "url": page_url, "metadata": metadata,
                  "error": "Page URL points to a private/internal address (blocked for security)"}]
 
-    opener = urllib.request.build_opener(
-        SafeRedirectHandler(),
-        urllib.request.HTTPSHandler(context=_make_ssl_context()),
-    )
+    # Check if URL is a direct image before fetching page HTML
+    # (quick HEAD-like check via Content-Type on first byte of response)
     try:
-        req = urllib.request.Request(page_url, headers=_BROWSER_HEADERS)
-        with opener.open(req, timeout=timeout) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            if content_type.startswith("image/"):
-                # URL is a direct image; delegate to the standard download path.
-                return [_download_one(page_url, images_dir, metadata, timeout)]
-            charset_match = re.search(r"charset=([^\s;]+)", content_type)
-            charset = charset_match.group(1) if charset_match else "utf-8"
-            raw = resp.read(_MAX_PAGE_BYTES)
-        html = raw.decode(charset, errors="replace")
+        html = _fetch_page_html(page_url, timeout)
+    except _DirectImageContent:
+        return [_download_one(page_url, images_dir, metadata, timeout)]
     except Exception as exc:
         return [{"status": "failed", "url": page_url, "metadata": metadata, "error": str(exc)}]
 

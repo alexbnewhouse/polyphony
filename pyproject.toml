@@ -53,6 +53,9 @@ diarize = [
     "faster-whisper>=1.0",
     "pyannote.audio>=3.1",
 ]
+scraper = [
+    "cloudscraper>=1.2",
+]
 gui = [
     "streamlit>=1.30.0",
     "plotly>=5.18.0",
@@ -67,6 +70,7 @@ all = [
     "pyannote.audio>=3.1",
     "streamlit>=1.30.0",
     "plotly>=5.18.0",
+    "cloudscraper>=1.2",
 ]
 dev = [
     "pytest>=8.0",

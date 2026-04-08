@@ -571,6 +571,7 @@ pip install polyphony[images]          # Pillow for image metadata
 pip install polyphony[audio]           # faster-whisper local transcription
 pip install polyphony[audio-gpu]       # faster-whisper + CUDA libraries for GPU acceleration
 pip install polyphony[diarize]         # Speaker diarization (pyannote.audio + faster-whisper)
+pip install polyphony[scraper]         # cloudscraper for Cloudflare-protected archive sites (e.g. 4plebs)
 pip install polyphony[openai]          # OpenAI API support
 pip install polyphony[anthropic]       # Anthropic API support
 pip install polyphony[all-providers]   # All cloud providers
